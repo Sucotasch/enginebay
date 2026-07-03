@@ -20,9 +20,9 @@ TEST_MAX_TOKENS = 1024
 
 def start_server(extra_args: str) -> subprocess.Popen:
     """Start llama-server with given extra arguments."""
-    cmd = f'"{LLAMA_SERVER}" -m "{MODEL}" --port {PORT} --host 127.0.0.1 {extra_args}'
+    cmd = [LLAMA_SERVER, "-m", MODEL, "--port", str(PORT), "--host", "127.0.0.1"] + extra_args.split()
     proc = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
     )
     return proc
@@ -34,9 +34,9 @@ def wait_for_server(timeout=60) -> bool:
     start = time.time()
     while time.time() - start < timeout:
         try:
-            resp = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2)
-            if resp.status == 200:
-                return True
+            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2) as resp:
+                if resp.status == 200:
+                    return True
         except:
             pass
         time.sleep(1)
@@ -60,8 +60,8 @@ def run_test() -> dict:
     )
     
     t0 = time.time()
-    resp = urllib.request.urlopen(req, timeout=300)
-    data = json.loads(resp.read())
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        data = json.loads(resp.read())
     elapsed = time.time() - t0
     
     timings = data.get("timings", {})
@@ -98,9 +98,6 @@ def stop_server(proc: subprocess.Popen):
         except:
             pass
     time.sleep(3)
-    # Kill any remaining
-    subprocess.run("taskkill /F /IM llama-server.exe", shell=True, capture_output=True)
-    time.sleep(2)
 
 
 def run_config(name: str, args: str) -> dict:
@@ -135,6 +132,10 @@ def run_config(name: str, args: str) -> dict:
 
 
 def main():
+    if not os.path.exists(MODEL):
+        print(f"CRITICAL ERROR: Model not found at {MODEL}")
+        sys.exit(1)
+
     configs = [
         # Config 1: Baseline (user's command without --n-cpu-moe)
         ("baseline_no_moe", 

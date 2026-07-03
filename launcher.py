@@ -344,6 +344,7 @@ class LLMLauncher(QMainWindow):
     _show_updates_signal = pyqtSignal(list)
     _refresh_versions_signal = pyqtSignal()
     _on_exit_signal = pyqtSignal()
+    _health_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -364,6 +365,7 @@ class LLMLauncher(QMainWindow):
         self._show_updates_signal.connect(self._show_updates)
         self._refresh_versions_signal.connect(self._refresh_versions_list)
         self._on_exit_signal.connect(self._on_process_exit)
+        self._health_signal.connect(self._set_status)
 
         self._build_ui()
 
@@ -1023,13 +1025,6 @@ class LLMLauncher(QMainWindow):
                 )
             except Exception:
                 pass
-        try:
-            subprocess.run(
-                "taskkill /F /T /IM llama-server.exe",
-                shell=True, capture_output=True, timeout=5
-            )
-        except Exception:
-            pass
         self.process = None
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
@@ -1087,17 +1082,18 @@ class LLMLauncher(QMainWindow):
             return
         host = self.host_entry.text().strip() or HOST
         port = self.port_entry.text().strip() or PORT
-        try:
-            resp = urllib.request.urlopen(f"http://{host}:{port}/health", timeout=2)
-            if resp.status == 200:
-                self._set_status("online")
-            else:
-                self._set_status("loading")
-        except Exception:
-            if self.process:
-                self._set_status("loading")
-            else:
-                self._set_status("offline")
+
+        def worker():
+            try:
+                with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=2) as resp:
+                    if resp.status == 200:
+                        self._health_signal.emit("online")
+                    else:
+                        self._health_signal.emit("loading")
+            except Exception:
+                self._health_signal.emit("loading" if self.process else "offline")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ── Helpers ─────────────────────────────────────────────────────
 
