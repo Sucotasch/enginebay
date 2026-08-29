@@ -21,7 +21,12 @@ set "SRC_DIR=%SCRIPT_DIR%ik_llama.cpp"
 set "BUILD_DIR=%SRC_DIR%\build"
 
 set "CUDA_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1"
+set "CUDA_PATH=%CUDA_DIR%"
+set "CUDA_PATH_V13_1=%CUDA_DIR%"
 set "CUDA_ARCH=89"
+
+rem MSVC environment (cl.exe, link.exe) — required for CUDA + C++ builds
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
 
 if not exist "%SRC_DIR%\.git" (
     echo [1/4] Cloning ik_llama.cpp...
@@ -41,7 +46,10 @@ cmake -S "%SRC_DIR%" -B "%BUILD_DIR%" ^
 if errorlevel 1 ( echo FAILED: cmake configure & pause & exit /b 1 )
 
 echo [3/4] Building (this is the slow step, be patient)...
-cmake --build "%BUILD_DIR%" --config Release -j 8
+rem NOTE: do NOT use -j / --parallel with MSBuild on this system — the
+rem sandbox blocks named pipes used by parallel MSBuild worker nodes.
+rem Single-node build is slower but succeeds.
+cmake --build "%BUILD_DIR%" --config Release
 if errorlevel 1 ( echo FAILED: cmake build & pause & exit /b 1 )
 
 echo [4/4] Installing into versions folder...

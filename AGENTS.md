@@ -57,8 +57,19 @@ The launcher supports multiple llama-server engines. Each engine has its own Git
 |--------|------|--------------|-------------------|
 | `llama.cpp` (upstream) | `ggml-org/llama.cpp` | `llama.cpp/versions/` | — |
 | `beellama.cpp` (fork) | `Anbeeld/beellama.cpp` | `beellama.cpp/versions/` | `kvarn2`-`kvarn8`, `q2_0`-`q6_1`, `--kv-tail-tokens` |
+| `ik_llama.cpp` (fork, **manual build**) | `ikawrakow/ik_llama.cpp` | `ik_llama.cpp/versions/` | IQ4_KT/IQ4_KS, IQK quants (ggml types > 49) |
 
-To add a new engine: extend the `ENGINES` dict in `launcher.py` with `label`, `repo`, `api`, `versions_dir`, a `classify(asset_name) -> (kind, cuda)` parser, and `default_params`. The GUI dropdown, update checker, and version download all read from this registry.
+**ik_llama.cpp has NO prebuilt Windows binaries** (only tag `t0002` with 0 assets). It must be built from source. This is the ONLY engine that can read models quantized with ik_llama.cpp's extended types — e.g. `Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf` (ggml type 144, unreadable by beellama which stops at type 49).
+
+To build (see `build-ikllama.bat`):
+1. Requires: VS BuildTools (vcvars64.bat), CMake ≥ 3.24, Git, CUDA Toolkit (nvcc + cublas.lib).
+2. CUDA 13.1 + MSVC 14.44 need `CUDA_PATH_V13_1` env var set BEFORE vcvars64, or MSBuild fails with "CUDA Toolkit directory '' does not exist".
+3. Build command: `cmake -S ik_llama.cpp -B ik_llama.cpp/build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DGGML_LLAMAFILE=OFF` then `cmake --build ... --config Release -j 8`.
+4. Runtime CUDA DLLs (cublas64_13.dll, cublasLt64_13.dll, cudart64_13.dll) are NOT in the local CUDA v13.1 `bin` — copy them from `beellama.cpp/versions/preview-v0.4.4-cuda-13.1/`.
+5. **Builds take 30-90 min on i7-5820K.** Never interrupt — partial builds must restart from scratch.
+6. The launcher's "Check Updates" on this engine shows build instructions (manual_build flag); it does NOT query GitHub releases.
+
+To add a new engine: extend the `ENGINES` dict in `launcher.py` with `label`, `repo`, `api`, `versions_dir`, a `classify(asset_name) -> (kind, cuda)` parser (or `classify: None` + `manual_build: True` for source-built engines), and `default_params`. The GUI dropdown, update checker, and version download all read from this registry.
 
 To use BeeLlama:
 1. In the GUI, set the **Engine** dropdown to "BeeLlama.cpp (fork)".
