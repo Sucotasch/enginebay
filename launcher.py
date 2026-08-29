@@ -152,6 +152,21 @@ ENGINES = {
             "--temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64"
         ),
     },
+    "ik_llama.cpp": {
+        "label": "ik_llama.cpp (fork — IQ4_KT/KS, trellis quants)",
+        "repo": "ikawrakow/ik_llama.cpp",
+        "api": "https://api.github.com/repos/ikawrakow/ik_llama.cpp/releases",
+        "versions_dir": SCRIPT_DIR / "ik_llama.cpp" / "versions",
+        "classify": None,          # no prebuilt binaries — build from source
+        "manual_build": True,      # show build instructions instead of update list
+        "build_script": "build-ikllama.bat",
+        "default_params": (
+            "-c 98304 -ngl 99 -b 2048 -ub 512 "
+            "--kv-unified --cache-type-k q4_0 --cache-type-v q4_0 "
+            "-t 5 --flash-attn on --reasoning off "
+            "--temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64"
+        ),
+    },
 }
 
 DEFAULT_ENGINE = "llama.cpp"
@@ -855,6 +870,21 @@ class LLMLauncher(QMainWindow):
 
     def _check_updates(self):
         eng = self._current_engine()
+        if eng.get("manual_build"):
+            # No prebuilt binaries for this engine — show build instructions.
+            self._log(f"{eng['label']}: no prebuilt releases — build from source")
+            self.dl_progress_label.setText("")
+            QMessageBox.information(
+                self,
+                "Build required",
+                f"{eng['label']} has no prebuilt Windows binaries.\n\n"
+                f"Build it once from source (see {eng.get('build_script', 'build-*.bat')}), "
+                f"then place the compiled llama-server.exe into:\n"
+                f"{eng['versions_dir']}\n\n"
+                f"After that, click 'Use' to activate it."
+            )
+            self._refresh_versions_list()
+            return
         self._log(f"Checking {eng['repo']}...")
         self.dl_progress_label.setText("loading...")
         QApplication.processEvents()

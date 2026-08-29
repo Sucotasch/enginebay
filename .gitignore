@@ -10,4 +10,5 @@ Ports.txt
 Audit/
 llama.cpp/versions/
 beellama.cpp/
+ik_llama.cpp/
 engines/
