@@ -1,19 +1,36 @@
 {
   "Qwen3.6-27B": {
-    "model": "G:/Ai/Models/Qwen3.6-27B.i1-IQ4/Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf",
     "params": "-c 98304 -ngl 99 -b 2048 -ub 512 --kv-unified --cache-type-k q4_0 --cache-type-v q4_0 -t 5 --flash-attn on --reasoning off --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64",
     "host": "127.0.0.1",
     "port": "8080"
   },
   "Agentic AI": {
-    "model": "G:/Ai/Models/Gemma Heretic/gemma-4-26b-a4b-it-heretic.q4_k_m.gguf",
     "params": "-c 98304 -np 1 -fa on -t 5 -ctk q4_0 -ctv q4_0 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
     "port": "8888"
   },
   "Gemma4 no-mmap": {
-    "model": "G:/Ai/Models/Gemma Heretic/gemma-4-26b-a4b-it-heretic.q4_k_m.gguf",
     "params": "-c 98304 -np 1 -fa on -t 5 -ctk q4_0 -ctv q4_0 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --no-mmap --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
+    "host": "127.0.0.1",
+    "port": "8888"
+  },
+  "Qwen3.6-27B (Bee KVarN)": {
+    "params": "-c 98304 -ngl 99 -b 2048 -ub 512 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 --flash-attn on --reasoning off --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64",
+    "host": "127.0.0.1",
+    "port": "8080"
+  },
+  "Qwen3.8-27B (Bee KVarN MTP)": {
+    "params": "-c 100000 -np 1 -ngl 99 -b 1024 -ub 256 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 -tb 6 --flash-attn on --spec-type draft-mtp --spec-draft-n-max 2 --reasoning auto --jinja --chat-template-file \"D:/Arx/Software Downloads/Hermes copy/llm-inference-server/configs/qwen3.8_sharp_chat_template.jinja\" --chat-template-kwargs \"{\\\"preserve_thinking\\\": true, \\\"reasoning_effort\\\":\\\"medium\\\"}\" --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
+    "host": "127.0.0.1",
+    "port": "8080"
+  },
+  "Qwen3.8-27B (Bee KVarN pure)": {
+    "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 -tb 6 --flash-attn on --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
+    "host": "127.0.0.1",
+    "port": "8080"
+  },
+  "Gemma4 (Bee q5_0 tail)": {
+    "params": "-c 98304 -np 1 -fa on -t 5 -ctk q5_0 -ctv q5_0 --kv-tail-tokens 1024 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
     "port": "8888"
   }

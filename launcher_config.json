@@ -1,7 +1,0 @@
-{
-  "model": "G:/Ai/Models/Gemma Heretic/gemma-4-26b-a4b-it-heretic.q4_k_m.gguf",
-  "binary": "d:\\Arx\\Software Downloads\\Hermes copy\\llm-inference-server\\llama.cpp\\versions\\b9861-cuda-13.3\\llama-server.exe",
-  "host": "127.0.0.1",
-  "port": "8888",
-  "params": "-c 98304 -np 1 -fa on -t 5 -ctk q4_0 -ctv q4_0 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --no-mmap --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off"
-}

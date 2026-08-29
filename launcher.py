@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 import zipfile
 import io
+import shlex
 from collections import defaultdict
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGroupBox, QLineEdit, QPushButton, QLabel, QComboBox,
     QTextEdit, QListWidget, QCheckBox, QFileDialog, QMessageBox,
-    QInputDialog, QSizePolicy, QScrollArea, QFrame, QDialog,
+    QInputDialog, QSizePolicy, QScrollArea, QFrame, QDialog, QMenu,
 )
 
 # --- Paths ---
@@ -78,17 +79,94 @@ def find_llama_server() -> Path | None:
 
 LLAMA_SERVER = find_llama_server()
 
-# --- Llama.cpp versions management ---
-VERSIONS_DIR = SCRIPT_DIR / "llama.cpp" / "versions"
-VERSIONS_DIR.mkdir(parents=True, exist_ok=True)
-GITHUB_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases"
+# --- Engines (alternative llama-server sources) ---
+
+def _extract_cuda_version(name: str) -> str:
+    """Extract a 'cuda-13.3' / 'cuda13.3' style version token from an asset name."""
+    parts = name.split("-")
+    for i, part in enumerate(parts):
+        if part == "cuda" and i + 1 < len(parts):
+            return f"cuda-{parts[i + 1]}"
+        if part.startswith("cuda") and len(part) > 4 and part[4:5].isdigit():
+            return part
+    return ""
 
 
-def get_installed_versions(active_path: str | None = None) -> list[dict]:
+def _classify_llama_asset(name: str):
+    """llama.cpp upstream assets:
+    llama-<tag>-bin-win-cuda-<v>-x64.zip  +  cudart-llama-<tag>-bin-win-cuda-<v>-x64.zip.
+    Returns (kind, cuda) where kind in ('bin','cudart'), or None."""
+    if not name.endswith(".zip") or "win" not in name.lower():
+        return None
+    if name.startswith("cudart-"):
+        kind = "cudart"
+    elif name.startswith("llama-"):
+        kind = "bin"
+    else:
+        return None
+    cuda = _extract_cuda_version(name)
+    return (kind, cuda) if cuda else None
+
+
+def _classify_beellama_asset(name: str):
+    """BeeLlama.cpp fork assets:
+    beellama-<tag>-bin-win-cuda-<v>-x64.zip  +  beellama-<tag>-cudart-win-cuda-<v>-x64.zip.
+    Returns (kind, cuda) where kind in ('bin','cudart'), or None."""
+    if not name.endswith(".zip") or "win" not in name.lower() or not name.startswith("beellama-"):
+        return None
+    if "-cudart-" in name:
+        kind = "cudart"
+    elif "-bin-" in name:
+        kind = "bin"
+    else:
+        return None
+    cuda = _extract_cuda_version(name)
+    return (kind, cuda) if cuda else None
+
+
+ENGINES = {
+    "llama.cpp": {
+        "label": "llama.cpp (upstream)",
+        "repo": "ggml-org/llama.cpp",
+        "api": "https://api.github.com/repos/ggml-org/llama.cpp/releases",
+        "versions_dir": SCRIPT_DIR / "llama.cpp" / "versions",
+        "classify": _classify_llama_asset,
+        "default_params": (
+            "-c 98304 -ngl 99 -b 2048 -ub 512 "
+            "--kv-unified --cache-type-k q4_0 --cache-type-v q4_0 "
+            "-t 5 --flash-attn on --reasoning off "
+            "--temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64"
+        ),
+    },
+    "beellama.cpp": {
+        "label": "BeeLlama.cpp (fork — KVarN, precision tail)",
+        "repo": "Anbeeld/beellama.cpp",
+        "api": "https://api.github.com/repos/Anbeeld/beellama.cpp/releases",
+        "versions_dir": SCRIPT_DIR / "beellama.cpp" / "versions",
+        "classify": _classify_beellama_asset,
+        "default_params": (
+            "-c 98304 -ngl 99 -b 2048 -ub 512 "
+            "--kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 "
+            "--kv-tail-tokens 1024 "
+            "-t 5 --flash-attn on --reasoning off "
+            "--temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64"
+        ),
+    },
+}
+
+DEFAULT_ENGINE = "llama.cpp"
+ENGINES[DEFAULT_ENGINE]["versions_dir"].mkdir(parents=True, exist_ok=True)
+ENGINES["beellama.cpp"]["versions_dir"].mkdir(parents=True, exist_ok=True)
+
+# Backward-compatible aliases
+VERSIONS_DIR = ENGINES["llama.cpp"]["versions_dir"]
+
+
+def get_installed_versions(versions_dir: Path, active_path: str | None = None) -> list[dict]:
     versions = []
-    if not VERSIONS_DIR.exists():
+    if not versions_dir.exists():
         return versions
-    for d in sorted(VERSIONS_DIR.iterdir(), reverse=True):
+    for d in sorted(versions_dir.iterdir(), reverse=True):
         if d.is_dir():
             exe = d / "llama-server.exe"
             if not exe.exists():
@@ -112,20 +190,9 @@ def get_installed_versions(active_path: str | None = None) -> list[dict]:
     return versions
 
 
-DEFAULT_PARAMS = (
-    "-c 98304 "
-    "-ngl 99 "
-    "-b 2048 -ub 512 "
-    "--kv-unified "
-    "--cache-type-k q4_0 --cache-type-v q4_0 "
-    "-t 5 "
-    "--flash-attn on "
-    "--reasoning off "
-    "--temp 1.0 "
-    "--min-p 0.05 "
-    "--top-p 0.95 "
-    "--top-k 64"
-)
+# Per-engine default launch params live in ENGINES[...]["default_params"].
+# The upstream llama.cpp default is retained below for reference / CLI reuse.
+DEFAULT_PARAMS = ENGINES["llama.cpp"]["default_params"]
 
 HOST = "127.0.0.1"
 PORT = "8888"
@@ -531,7 +598,7 @@ class LLMLauncher(QMainWindow):
         grp_params_layout = QHBoxLayout(grp_params)
 
         self.params_text = QTextEdit()
-        self.params_text.setPlainText(DEFAULT_PARAMS)
+        self.params_text.setPlainText(ENGINES[DEFAULT_ENGINE]["default_params"])
         self.params_text.setMaximumHeight(90)
         self.params_text.textChanged.connect(self._update_preview)
         grp_params_layout.addWidget(self.params_text, 1)
@@ -543,9 +610,19 @@ class LLMLauncher(QMainWindow):
 
         main_layout.addWidget(grp_params)
 
-        # ── Llama.cpp versions ──
-        grp_versions = QGroupBox("llama.cpp Versions")
+        # ── Engine / versions ──
+        grp_versions = QGroupBox("Engine / llama-server Versions")
         grp_versions_layout = QVBoxLayout(grp_versions)
+
+        engine_row = QHBoxLayout()
+        engine_lbl = QLabel("Engine:")
+        engine_row.addWidget(engine_lbl)
+        self.engine_combo = QComboBox()
+        for eid, eng in ENGINES.items():
+            self.engine_combo.addItem(eng["label"], eid)
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        engine_row.addWidget(self.engine_combo, 1)
+        grp_versions_layout.addLayout(engine_row)
 
         self.versions_list = QListWidget()
         self.versions_list.setMaximumHeight(80)
@@ -578,6 +655,10 @@ class LLMLauncher(QMainWindow):
         self.dl_progress_label = QLabel("")
         self.dl_progress_label.setStyleSheet("color: #888; font-size: 8pt;")
         vbtn_layout.addWidget(self.dl_progress_label)
+
+        self.preview_cb = QCheckBox("Show preview")
+        self.preview_cb.setToolTip("Show pre-release/preview builds (unstable)")
+        vbtn_layout.addWidget(self.preview_cb)
 
         grp_versions_layout.addLayout(vbtn_layout)
         main_layout.addWidget(grp_versions)
@@ -667,8 +748,7 @@ class LLMLauncher(QMainWindow):
             QMessageBox.information(self, "History", "No models in history yet.")
             return
 
-        menu = self.recent_btn.createStandardContextMenu()
-        menu.clear()
+        menu = QMenu(self)
         for p in self.history:
             name = Path(p).name
             action = menu.addAction(name)
@@ -679,8 +759,7 @@ class LLMLauncher(QMainWindow):
         if name == "(none)" or name not in self.presets:
             return
         p = self.presets[name]
-        if "model" in p:
-            self.model_entry.setText(p["model"])
+        # Preset applies params/host/port only — model is chosen via GUI.
         if "params" in p:
             self.params_text.setPlainText(p["params"])
         if "host" in p:
@@ -695,7 +774,6 @@ class LLMLauncher(QMainWindow):
             return
         name = name.strip()
         self.presets[name] = {
-            "model": self.model_entry.text().strip(),
             "params": self.params_text.toPlainText().strip(),
             "host": self.host_entry.text().strip(),
             "port": self.port_entry.text().strip(),
@@ -747,10 +825,19 @@ class LLMLauncher(QMainWindow):
 
     # ── Llama.cpp versions ───────────────────────────────────────────
 
+    def _current_engine(self) -> dict:
+        eid = self.engine_combo.currentData() if hasattr(self, "engine_combo") else None
+        return ENGINES.get(eid, ENGINES[DEFAULT_ENGINE])
+
+    def _current_engine_id(self) -> str:
+        eid = self.engine_combo.currentData() if hasattr(self, "engine_combo") else DEFAULT_ENGINE
+        return eid if eid in ENGINES else DEFAULT_ENGINE
+
     def _refresh_versions_list(self):
         self.versions_list.clear()
         active = self.bin_entry.text().strip() if hasattr(self, 'bin_entry') else None
-        self.installed_versions = get_installed_versions(active)
+        eng = self._current_engine()
+        self.installed_versions = get_installed_versions(eng["versions_dir"], active)
         if not self.installed_versions:
             self.versions_list.addItem("  (no installed versions)")
             return
@@ -759,57 +846,53 @@ class LLMLauncher(QMainWindow):
             status = "\u2713" if v["path"] else "\u2717 no exe"
             self.versions_list.addItem(f"{marker}{v['name']}  [{status}]")
 
+    def _on_engine_changed(self):
+        eng = self._current_engine()
+        self._log(f"Engine: {eng['label']} — versions: {eng['versions_dir']}")
+        self._refresh_versions_list()
+        # Persist engine selection so it survives restarts
+        save_config({**self.cfg, "engine_id": self._current_engine_id()})
+
     def _check_updates(self):
-        self._log("Checking GitHub...")
+        eng = self._current_engine()
+        self._log(f"Checking {eng['repo']}...")
         self.dl_progress_label.setText("loading...")
         QApplication.processEvents()
 
         def worker():
             try:
-                req = urllib.request.Request(GITHUB_API, headers={"User-Agent": "LLM-Launcher"})
+                req = urllib.request.Request(eng["api"], headers={"User-Agent": "LLM-Launcher"})
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     releases = json.loads(resp.read())
 
                 installed_names = [v["name"] for v in self.installed_versions]
+                show_preview = self.preview_cb.isChecked() if hasattr(self, "preview_cb") else False
                 groups = defaultdict(dict)
                 for r in releases[:10]:
-                    if r.get("prerelease") or r.get("draft"):
+                    if r.get("draft"):
+                        continue
+                    if r.get("prerelease") and not show_preview:
                         continue
                     tag = r["tag_name"]
                     for a in r.get("assets", []):
-                        name = a["name"]
-                        if not name.startswith("llama-") and not name.startswith("cudart-"):
+                        parsed = eng["classify"](a["name"])
+                        if not parsed:
                             continue
-                        if "win" not in name.lower():
-                            continue
-                        if not name.endswith(".zip"):
-                            continue
-                        cuda_ver = ""
-                        for i, part in enumerate(name.split("-")):
-                            if part == "cuda" and i + 1 < len(name.split("-")):
-                                next_part = name.split("-")[i + 1]
-                                cuda_ver = f"cuda-{next_part}"
-                                break
-                            elif part.startswith("cuda") and part[4:5].isdigit():
-                                cuda_ver = part
-                                break
-                        if not cuda_ver:
-                            continue
-                        is_cudart = name.startswith("cudart-")
-                        key = (tag, cuda_ver)
-                        if is_cudart:
+                        kind, cuda = parsed
+                        key = (tag, cuda)
+                        if kind == "cudart":
                             groups[key]["cudart"] = {"url": a["browser_download_url"], "size": a["size"]}
                         else:
-                            groups[key]["llama"] = {"url": a["browser_download_url"], "size": a["size"], "name": name}
+                            groups[key]["llama"] = {"url": a["browser_download_url"], "size": a["size"], "name": a["name"]}
 
                 available = []
-                for (tag, cuda_ver), assets in groups.items():
+                for (tag, cuda), assets in groups.items():
                     if "cudart" not in assets or "llama" not in assets:
                         continue
                     total_size = assets["cudart"]["size"] + assets["llama"]["size"]
                     available.append({
                         "tag": tag,
-                        "cuda": cuda_ver,
+                        "cuda": cuda,
                         "cudart_url": assets["cudart"]["url"],
                         "cudart_size": assets["cudart"]["size"],
                         "llama_url": assets["llama"]["url"],
@@ -846,15 +929,16 @@ class LLMLauncher(QMainWindow):
             self._log("No builds found")
             return
 
-        # Create dialog
+        eng = self._current_engine()
+        self._updates_engine_id = self._current_engine_id()
         self._updates_dialog = QDialog(self)
-        self._updates_dialog.setWindowTitle("Available llama.cpp versions")
+        self._updates_dialog.setWindowTitle(f"Available {eng['label']} versions")
         self._updates_dialog.resize(600, 400)
         self._updates_dialog.setModal(False)
 
         layout = QVBoxLayout(self._updates_dialog)
 
-        header = QLabel("Available builds (Windows CUDA):")
+        header = QLabel(f"Available builds for {eng['label']}:")
         header.setStyleSheet("color: #569cd6; font-weight: bold; font-size: 10pt;")
         layout.addWidget(header)
 
@@ -895,6 +979,7 @@ class LLMLauncher(QMainWindow):
                 chosen["cuda"],
                 chosen["cudart_url"],
                 chosen["llama_url"],
+                engine_id=self._updates_engine_id,
             )
 
         download_btn.clicked.connect(on_download)
@@ -905,9 +990,11 @@ class LLMLauncher(QMainWindow):
     def _download_version(self):
         self._check_updates()
 
-    def _download_paired(self, tag: str, cuda: str, cudart_url: str, llama_url: str | None):
+    def _download_paired(self, tag: str, cuda: str, cudart_url: str, llama_url: str | None,
+                         engine_id: str | None = None):
         dest_name = f"{tag}-{cuda}" if cuda else tag
-        self._log(f"Downloading {dest_name} (cudart + bins)...")
+        eng = ENGINES.get(engine_id) if engine_id else self._current_engine()
+        self._log(f"Downloading {dest_name} from {eng['repo']} (cudart + bins)...")
         self.dl_progress_label.setText("downloading 1/2...")
         QApplication.processEvents()
 
@@ -926,7 +1013,7 @@ class LLMLauncher(QMainWindow):
 
                 self._set_progress_signal.emit("extracting...")
 
-                dest = VERSIONS_DIR / dest_name
+                dest = eng["versions_dir"] / dest_name
                 dest.mkdir(parents=True, exist_ok=True)
 
                 with zipfile.ZipFile(io.BytesIO(cudart_data)) as zf:
@@ -956,6 +1043,12 @@ class LLMLauncher(QMainWindow):
         self.bin_entry.setText(v["path"])
         self._log(f"Active version: {v['name']}")
         self._refresh_versions_list()
+        # Persist engine + binary so the choice survives restarts
+        save_config({
+            **self.cfg,
+            "engine_id": self._current_engine_id(),
+            "binary": v["path"],
+        })
 
     def _delete_version(self):
         row = self.versions_list.currentRow()
@@ -991,12 +1084,16 @@ class LLMLauncher(QMainWindow):
             QMessageBox.warning(self, "Error", f"llama-server not found:\n{binary}")
             return
 
-        cmd = f'"{binary}" -m "{model}" --host {host} --port {port} --alias "Local Model" {params}'
-        self._log(f"Launching: {cmd}")
-
         try:
+            # Build argv as a list (no shell) so nested quotes in params
+            # (e.g. --chat-template-kwargs "{...}") survive verbatim.
+            argv = [binary, "-m", model, "--host", host, "--port", port,
+                    "--alias", "Local Model"]
+            if params:
+                argv += shlex.split(params, posix=True)
+            self._log(f"Launching: {' '.join(argv)}")
             self.process = subprocess.Popen(
-                cmd, shell=True,
+                argv,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
             )
@@ -1006,7 +1103,7 @@ class LLMLauncher(QMainWindow):
 
         save_config({
             "model": model, "binary": binary, "host": host, "port": port,
-            "params": params
+            "params": params, "engine_id": self._current_engine_id()
         })
         save_history(model, self.history)
 
@@ -1040,7 +1137,8 @@ class LLMLauncher(QMainWindow):
             log_dir.mkdir(exist_ok=True)
             ts = time.strftime("%Y%m%d_%H%M%S")
             log_path = log_dir / f"llama_{ts}.log"
-            self.log_file = open(log_path, "a", encoding="utf-8")
+            # Line-buffered so output survives crashes without explicit flush
+            self.log_file = open(log_path, "a", encoding="utf-8", buffering=1)
             self._log(f"Log saving: {log_path}")
             save_config({**self.cfg, "log_save": True})
         else:
@@ -1160,6 +1258,8 @@ class LLMLauncher(QMainWindow):
 
     def _load_saved_state(self):
         if self.cfg:
+            # Restore fields BEFORE refreshing the versions list, so the
+            # active-version marker uses the saved binary path.
             if "model" in self.cfg:
                 self.model_entry.setText(self.cfg["model"])
             if "binary" in self.cfg:
@@ -1170,6 +1270,18 @@ class LLMLauncher(QMainWindow):
                 self.port_entry.setText(self.cfg["port"])
             if "params" in self.cfg:
                 self.params_text.setPlainText(self.cfg["params"])
+
+            engine_id = self.cfg.get("engine_id") or self.cfg.get("engine")
+            if engine_id:
+                idx = self.engine_combo.findData(engine_id)
+                if idx < 0:
+                    # fallback: match by label for older configs that saved label
+                    idx = self.engine_combo.findText(engine_id)
+                if idx >= 0:
+                    self.engine_combo.blockSignals(True)
+                    self.engine_combo.setCurrentIndex(idx)
+                    self.engine_combo.blockSignals(False)
+                    self._refresh_versions_list()
 
 
 def main():

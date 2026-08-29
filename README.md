@@ -7,18 +7,20 @@ Local llama.cpp inference server with PyQt6 GUI launcher. Provides OpenAI-compat
 - **PyQt6 GUI launcher** — model selection, presets, llama.cpp version management
 - **Auto-discovery** — finds Hermes config and llama-server binary automatically
 - **Version manager** — download, install, and switch between llama.cpp releases from GitHub
+- **Multi-engine support** — select between upstream llama.cpp and BeeLlama.cpp (fork) with per-engine version management, download, and activation
 - **Health monitor** — real-time server status in the GUI
 
 ## Project Structure
 
 ```
 llm-inference-server/
-├── launcher.py              ← PyQt6 GUI (model selection, presets, versions)
-├── launcher_presets.json    ← saved configs
+├── launcher.py              ← PyQt6 GUI (model selection, presets, engines, versions)
+├── launcher_presets.json    ← saved configs (incl. BeeLlama KVarN presets)
 ├── launcher_config.json     ← last used config
 ├── Launcher.vbs             ← launch GUI (no terminal)
 ├── Launcher.bat             ← launch GUI (fallback)
-├── start-llama.bat          ← start server (Qwen3.6-27B, port 8080)
+├── start-llama.bat          ← start server (Qwen3.6-27B, upstream, port 8080)
+├── start-beellama.bat       ← start server (Qwen3.6-27B, BeeLlama KVarN, port 8080)
 ├── stop-llama.bat           ← stop server
 ├── launch-hermes-llama.bat  ← start server + Hermes
 ├── configs/
@@ -31,7 +33,9 @@ llm-inference-server/
 ├── benchmarks/
 │   ├── bench.sh             ← TTFT/TPOT benchmark
 │   └── systematic_bench.py  ← automated config testing
-├── llama.cpp/versions/      ← downloaded llama.cpp releases
+├── llama.cpp/versions/      ← downloaded upstream llama.cpp releases
+├── beellama.cpp/            ← BeeLlama source checkout (reference)
+│   └── versions/            ← downloaded BeeLlama releases
 └── pyproject.toml
 ```
 
@@ -96,9 +100,28 @@ The server is explicitly configured around the unique physical architecture of *
 To achieve optimal performance (~34 tokens/sec decoding, ~58 tokens/sec prefilling), you **must** adhere to the following configuration constraints:
 
 * **Optimal Context Limit (`-c 98304`):** 96K is the absolute optimal context. Pushing the context to 128K will catastrophically degrade decoding speeds (dropping from ~34 tok/s to ~6 tok/s).
-* **KV Cache Quantization (`--cache-type-k q4_0 --cache-type-v q4_0`):** Both Key and Value caches **must** be quantized to `q4_0`. Using higher precision (like `q8_0`) at large contexts will exhaust VRAM and ruin generation speeds.
+* **KV Cache Quantization (`--cache-type-k q4_0 --cache-type-v q4_0`):** Both Key and Value caches **must** be quantized to `q4_0` when running upstream llama.cpp. Using higher precision (like `q8_0`) at large contexts will exhaust VRAM and ruin generation speeds.
 * **CPU MoE Flag:** Do not use `--n-cpu-moe`. Qwen3.6-27B is a dense model; this flag will have no effect.
 * **Reasoning Off (`--reasoning off`):** Required to ensure fast, single-shot inference responses without inner-monologue delays.
+
+### Alternative Engines (BeeLlama.cpp)
+
+The launcher can manage multiple llama-server engines. Besides upstream `llama.cpp`, it supports **BeeLlama.cpp** — a performance-focused fork that adds:
+
+- **KVarN KV-cache quantization** — variance-normalized cache types `kvarn2`–`kvarn8` (e.g. `--cache-type-k kvarn5 --cache-type-v kvarn4`)
+- **KV cache precision tail** — keep recent tokens exact in F16/BF16 (`--kv-tail-tokens 1024`)
+- **Additional low-bit caches** — `q2_0`–`q6_1`
+- **Adaptive DFlash draft control** and **reasoning-loop protection**
+
+To use it:
+
+1. Open `Launcher.bat`
+2. Set the **Engine** dropdown to `BeeLlama.cpp (fork)`
+3. **Check Updates** → download a Windows CUDA build (e.g. `v0.4.3-cuda-13.3`)
+4. Click **Use** to activate the binary
+5. Load the `Qwen3.6-27B (Bee KVarN)` preset — it swaps the KV cache to KVarN + 1024-token tail
+
+Each engine keeps its own versions directory (`llama.cpp/versions/` vs `beellama.cpp/versions/`), so you can switch back and forth freely. See [AGENTS.md](AGENTS.md#alternative-engines) for how to register additional engines.
 
 ---
 
