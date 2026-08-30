@@ -46,10 +46,16 @@ cmake -S "%SRC_DIR%" -B "%BUILD_DIR%" ^
 if errorlevel 1 ( echo FAILED: cmake configure & pause & exit /b 1 )
 
 echo [3/4] Building (this is the slow step, be patient)...
-rem NOTE: do NOT use -j / --parallel with MSBuild on this system — the
-rem sandbox blocks named pipes used by parallel MSBuild worker nodes.
-rem Single-node build is slower but succeeds.
-cmake --build "%BUILD_DIR%" --config Release
+rem Parallel build: pass the job count as the first argument, default 6.
+rem   build-ikllama.bat 8   -> 8 parallel cl.exe processes
+rem IMPORTANT: run this .bat by hand (double-click / your own terminal).
+rem If an agent launches it through a file sandbox, the sandbox blocks the
+rem inter-process pipes MSBuild needs for parallel worker nodes, so the
+rem build silently degrades to ONE process (11-13% CPU, several hours).
+rem Outside the sandbox /m:N parallelizes normally (4-6 processes).
+set "JOBS=%~1"
+if "%JOBS%"=="" set "JOBS=6"
+cmake --build "%BUILD_DIR%" --config Release --parallel %JOBS%
 if errorlevel 1 ( echo FAILED: cmake build & pause & exit /b 1 )
 
 echo [4/4] Installing into versions folder...

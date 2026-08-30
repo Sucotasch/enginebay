@@ -64,7 +64,7 @@ The launcher supports multiple llama-server engines. Each engine has its own Git
 To build (see `build-ikllama.bat`):
 1. Requires: VS BuildTools (vcvars64.bat), CMake ≥ 3.24, Git, CUDA Toolkit (nvcc + cublas.lib).
 2. CUDA 13.1 + MSVC 14.44 need `CUDA_PATH_V13_1` env var set BEFORE vcvars64, or MSBuild fails with "CUDA Toolkit directory '' does not exist".
-3. Build command: `cmake -S ik_llama.cpp -B ik_llama.cpp/build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DGGML_LLAMAFILE=OFF` then `cmake --build ... --config Release -j 8`.
+3. Build command: `cmake -S ik_llama.cpp -B ik_llama.cpp/build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DGGML_LLAMAFILE=OFF` then `cmake --build ... --config Release --parallel 6`. **Run `build-ikllama.bat` by hand (double-click / own terminal), NOT through the agent sandbox** — the sandbox blocks the inter-process pipes MSBuild uses for parallel worker nodes, so the build silently degrades to ONE process (11-13% CPU, several hours). Outside the sandbox, `--parallel N` (default 6) runs 4-6 parallel cl.exe processes like normal MSVC projects.
 4. Runtime CUDA DLLs (cublas64_13.dll, cublasLt64_13.dll, cudart64_13.dll) are NOT in the local CUDA v13.1 `bin` — copy them from `beellama.cpp/versions/preview-v0.4.4-cuda-13.1/`.
 5. **Builds take 30-90 min on i7-5820K.** Never interrupt — partial builds must restart from scratch.
 6. The launcher's "Check Updates" on this engine shows build instructions (manual_build flag); it does NOT query GitHub releases.
