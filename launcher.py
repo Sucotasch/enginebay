@@ -109,9 +109,11 @@ def resolve_param_paths(params: str) -> str:
 
     Walks the tokens; for each known path-taking flag it resolves the next
     token against SCRIPT_DIR when that file exists there, making the path
-    absolute so the server works regardless of the process CWD. Absolute
-    values and missing files are left verbatim, and flags like
-    --chat-template-kwargs survive untouched.
+    absolute with forward slashes so the server works regardless of the
+    process CWD. Absolute values and missing files are left verbatim.
+
+    Uses shlex.join to re-quote the output, so JSON values like
+    --chat-template-kwargs survive a second shlex.split round-trip.
     """
     if not params:
         return params
@@ -127,10 +129,10 @@ def resolve_param_paths(params: str) -> str:
             if not p.is_absolute():
                 cand = SCRIPT_DIR / val
                 if cand.exists():
-                    out.append(str(cand))
+                    out.append(str(cand).replace("\\", "/"))
                     i += 1
         i += 1
-    return " ".join(out)
+    return shlex.join(out) if out else params
 
 # --- Auto-discover llama-server ---
 def find_llama_server() -> Path | None:
