@@ -180,6 +180,38 @@ POSIX unistd, CUDA 13.2 + Windows).
 
 ---
 
+## 6b. syv-ai/qwen38-27b-rtx3090 (референс, клон в `qwen3090_research/`)
+
+vLLM-стек (Python + safetensors W4A16 AutoRound, НЕ GGUF), Qwen3.8-27B на одной
+RTX 3090 24GB, 150K контекст. **Референс-ориентир скорости, не инструмент для
+нас** (нужно 24GB, формат не читается нашими движками).
+
+**Измеренные там числа (RTX 3090, 250W):**
+- single-user MTP: **121 tok/s** (greedy 120); DFlash2: 127-133 tok/s
+- копирование/цитирование контекста: **381 tok/s** (lookup/drafting из промпта)
+- batch (64 conc): ~1035 tok/s агрегат
+- повторный запрос к тому же документу: **0.56s vs 22.4s** (PREFIX_CACHE)
+- KVarN 4/2-bit KV cache: **268K контекст** на 24GB
+
+**Что это дало НАМ (эмпирически проверено на ik_llama):**
+- **ik_llama имеет prompt cache в RAM по умолчанию** (`--cache-ram 8192`,
+  `--cache-ram-similarity 0.50`, `--cache-ram-n-min`). Это аналог PREFIX_CACHE
+  vLLM. Для qwen35 работает (`llama_model_supports_partial_kv_reuse` → true).
+  Отключается только для openPangu+MTP.
+- **Замер на нашей машине** (96K pure, IQ4_KT/KS, префикс ~20K токенов):
+  warmup 26.46s → повторные запросы **0.86s / 0.84s** (f_keep: 1.00,
+  cache 30965 токенов). Это ~30x на повторных запросах — критично для
+  Hermes-агента, который шлёт один и тот же системный префикс (~20K).
+- **Hermes-вывод:** пока контекст не переполняется, повторные запросы почти
+  бесплатны. `--cache-ram 0` отключает (не делать).
+
+**Что НЕ переносится к нам (для памяти):**
+- vLLM-specific патчи (DFlash2 backport #52816, Marlin int8, int4-KV-per-token-head).
+- KVarN-порт на vLLM 0.27.1 (у нас KVarN уже есть в beellama: kvarn5/kvarn4).
+- 150K/268K контекст недостижим на 16GB с моделью 14GB.
+
+---
+
 ## 7. Ловушки и уроки (проверено на практике)
 
 1. **BOM в JSON ломает launcher.** `load_presets`/конфиг читаются через
