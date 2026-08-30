@@ -163,6 +163,19 @@ The sharp chat template (used by the MTP preset via
    (Packages: `PyQt6`, `openai`, `httpx` — see `requirements.txt`.)
 3. *(Optional but Recommended)* Ensure `llama-server.exe` is either in your system PATH, or download it directly through the Launcher's built-in Version Manager. The **ik_llama.cpp** engine has no prebuilt binaries — use `build-ikllama.bat` to build it (the release archive ships it pre-built).
 
+### First Launch (quick start)
+
+1. **Unzip** the release archive anywhere (or clone the repo).
+2. **Install deps:** double-click `setup-deps.bat` (installs `PyQt6`, `openai`, `httpx`).
+3. **Launch the GUI:** double-click `Launcher.vbs` (no terminal window) or run `python launcher.py`.
+4. **Select your model:** pick the GGUF in the *Model* field (e.g. from the HF links above).
+5. **Pick the engine:** set the *Engine* dropdown to `ik_llama.cpp` (for IQ4_KT/KS) or `llama.cpp` / `BeeLlama.cpp` — use **Check Updates → Use** to activate a binary.
+6. **Load a preset:** choose `Qwen3.8-27B (ik_llama pure)` from the presets list (96K, q4_0 KV, `--reasoning auto`).
+7. **Start:** click **Start Server** and wait for the model to load into VRAM.
+
+From the console instead: `set MODEL_GGUF=<path>` then `start-llama.bat`
+(or `start-beellama.bat` for the KVarN preset).
+
 ### Critical Server Tuning & Constraints
 To achieve optimal performance (**~35.9 tokens/sec decoding at 96K on ik_llama**,
 see the Hardware section above), you **must** adhere to the following configuration constraints:
