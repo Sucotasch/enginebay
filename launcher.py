@@ -779,14 +779,55 @@ class LLMLauncher(QMainWindow):
         if name == "(none)" or name not in self.presets:
             return
         p = self.presets[name]
-        # Preset applies params/host/port only — model is chosen via GUI.
+        # Presets are model-agnostic (params only), but params are engine-specific:
+        # warn if the selected preset carries flags the current engine cannot parse,
+        # otherwise they would crash the server at launch (exit 1, help dump).
+        bad = self._find_incompatible(p.get("params", ""))
+        if bad:
+            eng = self._current_engine()
+            self._log(f'Preset "{name}" has flags incompatible with {eng["label"]}: '
+                      f'{", ".join(bad)}')
+            box = QMessageBox(self)
+            box.setWindowTitle("Engine mismatch")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(
+                f'Preset "{name}" contains flags that {eng["label"]} does not support:\n'
+                f"    {', '.join(bad)}\n\n"
+                f"The server would fail at launch. Load engine defaults instead, "
+                f"or apply the preset as-is (advanced)."
+            )
+            defaults_btn = box.addButton("Load engine defaults",
+                                         QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Apply preset anyway",
+                          QMessageBox.ButtonRole.DestructiveRole)
+            box.exec()
+            if box.clickedButton() == defaults_btn:
+                self.params_text.setPlainText(eng["default_params"])
+                self._log(f"Loaded {eng['label']} defaults instead")
+                self._update_preview()
+                return
         if "params" in p:
             self.params_text.setPlainText(p["params"])
         if "host" in p:
             self.host_entry.setText(p["host"])
         if "port" in p:
             self.port_entry.setText(p["port"])
+        self._update_preview()
         self._log(f'Preset "{name}" loaded')
+
+    def _find_incompatible(self, params: str) -> list[str]:
+        """Return incompatible-param substrings found in a params string for the
+        current engine. Token-based: a flag like 'kvarn' also matches 'kvarn5'."""
+        eng = self._current_engine()
+        incompat = eng.get("incompatible_params")
+        if not incompat or not params:
+            return []
+        tokens = params.split()
+        found = []
+        for tok in incompat:
+            if any(tok in t for t in tokens):
+                found.append(tok)
+        return found
 
     def _save_preset(self):
         name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")

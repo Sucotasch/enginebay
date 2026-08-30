@@ -7,22 +7,29 @@ Local llama.cpp inference server with PyQt6 GUI launcher. Provides OpenAI-compat
 - **PyQt6 GUI launcher** — model selection, presets, llama.cpp version management
 - **Auto-discovery** — finds Hermes config and llama-server binary automatically
 - **Version manager** — download, install, and switch between llama.cpp releases from GitHub
-- **Multi-engine support** — select between upstream llama.cpp and BeeLlama.cpp (fork) with per-engine version management, download, and activation
+- **Multi-engine support** — select between upstream llama.cpp, BeeLlama.cpp (fork), and ik_llama.cpp (fork, source-built) with per-engine version management, download, and activation
+- **Engine-safe presets** — presets carry params/host/port only (never model paths); incompatible flags are auto-detected when switching engines or loading presets, with a warning dialog instead of a crash
 - **Health monitor** — real-time server status in the GUI
+
+> Engineering notes, measured VRAM budgets, engine flag differences, and build
+> gotchas live in **[dev_guide.md](dev_guide.md)**.
 
 ## Project Structure
 
 ```
 llm-inference-server/
 ├── launcher.py              ← PyQt6 GUI (model selection, presets, engines, versions)
-├── launcher_presets.json    ← saved configs (incl. BeeLlama KVarN presets)
-├── launcher_config.json     ← last used config
+├── launcher_presets.json    ← saved configs (incl. BeeLlama KVarN, ik_llama presets)
+├── launcher_config.json     ← last used config (git-ignored)
+├── dev_guide.md             ← engineering notes, VRAM budgets, engine flags, gotchas
+├── AGENTS.md                ← agent instruction file (engine table, build steps)
 ├── Launcher.vbs             ← launch GUI (no terminal)
 ├── Launcher.bat             ← launch GUI (fallback)
 ├── start-llama.bat          ← start server (Qwen3.6-27B, upstream, port 8080)
 ├── start-beellama.bat       ← start server (Qwen3.6-27B, BeeLlama KVarN, port 8080)
 ├── stop-llama.bat           ← stop server
 ├── launch-hermes-llama.bat  ← start server + Hermes
+├── build-ikllama.bat        ← build ik_llama.cpp from source (manual-build engine)
 ├── configs/
 │   └── inference.env        ← server parameters
 ├── scripts/
@@ -36,6 +43,8 @@ llm-inference-server/
 ├── llama.cpp/versions/      ← downloaded upstream llama.cpp releases
 ├── beellama.cpp/            ← BeeLlama source checkout (reference)
 │   └── versions/            ← downloaded BeeLlama releases
+├── ik_llama.cpp/            ← ik_llama source + build output (git-ignored; manual-build)
+│   └── versions/            ← built llama-server.exe + DLLs
 └── pyproject.toml
 ```
 
@@ -122,6 +131,32 @@ To use it:
 5. Load the `Qwen3.6-27B (Bee KVarN)` preset — it swaps the KV cache to KVarN + 1024-token tail
 
 Each engine keeps its own versions directory (`llama.cpp/versions/` vs `beellama.cpp/versions/`), so you can switch back and forth freely. See [AGENTS.md](AGENTS.md#alternative-engines) for how to register additional engines.
+
+### ik_llama.cpp (fork — trellis quants, manual build)
+
+**ik_llama.cpp** is the **only engine that can read the IQ4_KT/IQ4_KS trellis
+quants** (ggml types 144/145, e.g. `Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf`).
+Neither beellama (stops at type 49) nor vllm.cpp (decodes only up to IQ4_XS) can
+open these files.
+
+- **No prebuilt Windows binaries** (tag `t0002`, 0 assets) — build from source via
+  `build-ikllama.bat` (CMake + CUDA, arch 89). See [dev_guide.md](dev_guide.md#5-сборка-ik_llama.cpp-из-исходников) for build details.
+- Adds speculative MTP chains: `--spec-type ngram-mod:... --spec-type mtp:...`
+  (two-stage), but on 16GB VRAM MTP only fits up to 48K context — **for ≥64K use
+  the pure preset** (measured 35.9 t/s @ 96K).
+- Does **not** support `--kv-unified`, `kvarn*`, `--kv-tail-tokens`, or
+  `draft-mtp` (beellama flags). The launcher detects these and warns.
+
+### Engine-safe presets
+
+Presets store **params/host/port only — never model paths** (the model is picked
+in the GUI). Because each engine uses different flag names for the same concept
+(KV cache, speculative decoding, reasoning), the launcher:
+
+1. Resets params to the engine's defaults whenever you switch engines;
+2. Detects stale/foreign flags on config load and resets to safe defaults;
+3. **Warns with a dialog when you load a preset whose flags the current engine
+   cannot parse** (offers "Load engine defaults" or "Apply preset anyway").
 
 ---
 
