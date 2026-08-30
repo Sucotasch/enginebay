@@ -2,32 +2,32 @@
 
 ## What this is
 
-Windows-only llama.cpp inference server. Runs Qwen3.6-27B (IQ4_XS, 14GB GGUF) on RTX 4070 Ti SUPER (16GB VRAM). Provides OpenAI-compatible API for Hermes CLI client.
+Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS, 14GB GGUF) on RTX 4070 Ti SUPER (16GB VRAM) via ik_llama.cpp. Provides OpenAI-compatible API for Hermes CLI client and DeepSeek Harness GUI.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `start-llama.bat` | Start server — Qwen3.6-27B on port 8080 |
-| `start-beellama.bat` | Start server — Qwen3.6-27B with BeeLlama KVarN (port 8080) |
+| `start-llama.bat` | Start server — Qwen3.8-27B on port 8080 |
+| `start-beellama.bat` | Start server — Qwen3.8-27B with BeeLlama KVarN (port 8080) |
 | `stop-llama.bat` | Kill server |
 | `Launcher.bat` | Open PyQt6 GUI (`launcher.py`) |
 | `launch-hermes-llama.bat` | Start server + Hermes with local provider |
 | `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection** |
-| `launcher_presets.json` | Saved configs: "Qwen3.6-27B" (port 8080), "Agentic AI" (port 8888), "Qwen3.6-27B (Bee KVarN)" |
+| `launcher_presets.json` | Saved configs: "Qwen3.8-27B" (port 8080), "Agentic AI" (port 8888), "Qwen3.8-27B (Bee KVarN)" |
 | `configs/inference.env` | Server parameters |
 | `scripts/start_llama_cpp.sh` | Alternative launcher (Git Bash) |
 | `scripts/smoke_test.py` | Verify server is responding |
 
 ## Critical constraints
 
-- **96K context (98304) is optimal.** 128K kills decode speed (6 tok/s vs 34 tok/s). Do not change `-c` to 131072.
+- **96K context (98304) is optimal.** 128K drops decode speed (32.1 vs 35.9 t/s on ik_llama). Do not change `-c` to 131072.
 - **Upstream llama.cpp: q4_0 KV cache required.** q8_0 kills speed. Both `--cache-type-k` and `--cache-type-v` must be `q4_0`.
 - **BeeLlama engine: use KVarN cache types** — `--cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024` (balanced default). Upstream q4_0 also works but forfeits the fork's KV compression.
-- **`--n-cpu-moe` is useless** for Qwen3.6-27B — it's a dense model, not MoE.
-- **`--reasoning off`** required for fast single-shot inference on Qwen3.6-27B and Gemma. **Exception: Qwen3.8 (qwen35 arch) breaks with `--reasoning off`** — use `--reasoning auto` or the sharp chat template with `--chat-template-kwargs`.
+- **`--n-cpu-moe` is useless** for Qwen3.8-27B — it's a dense model, not MoE.
+- **`--reasoning auto` + `--jinja` required on Qwen3.8 (qwen35)** — `--reasoning off` breaks tools requests. (Upstream Qwen3.6-27B and Gemma use `--reasoning off`.)
 - **`-np 1` on Qwen3.8 presets** — auto parallel (`n_parallel=-1`) creates 4 slots × 96K KV cache, which tanks VRAM and drops speed to ~3.8 tok/s.
-- **Two ports**: 8080 (Qwen3.6-27B) and 8888 (Gemma 4 26B). Do not mix presets.
+- **Two ports**: 8080 (Qwen3.6/3.8-27B) and 8888 (Gemma 4 26B / Agentic). Do not mix presets.
 
 ## How to run
 
@@ -74,11 +74,16 @@ To add a new engine: extend the `ENGINES` dict in `launcher.py` with `label`, `r
 To use BeeLlama:
 1. In the GUI, set the **Engine** dropdown to "BeeLlama.cpp (fork)".
 2. **Check Updates** → download a Windows CUDA build (e.g. `v0.4.3-cuda-13.3`).
-3. Click **Use** to activate it, then load the "Qwen3.6-27B (Bee KVarN)" preset.
+3. Click **Use** to activate it, then load the "Qwen3.8-27B (Bee KVarN pure)" preset.
 
 ## Model details
 
-Qwen3.6-27B is a **hybrid Dense** model: 48 DeltaNet layers (linear attention, no KV cache) + 16 GQA Attention layers (traditional, needs KV cache). Only 16 layers consume KV cache — that's why a 14GB model fits in 16GB VRAM at 96K context.
+Qwen3.8-27B (qwen35 arch) is a **dense** model (not MoE). The primary
+`Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf` (~14 GB) is only readable by
+ik_llama.cpp (trellis quants 144/145). The IQ4_XS variant (~13.5 GB) is readable
+by all engines. On 16 GB VRAM, measured 35.9 t/s at 96K context (pure mode);
+MTP speculation fits only up to 48K. (The older Qwen3.6-27B is a hybrid dense
+model: 48 DeltaNet layers + 16 GQA attention layers.)
 
 ## llama-server binary
 
@@ -106,14 +111,17 @@ hand-edit it. `_dsh_upsert_local_llama(content, host, port)` is a pure module-le
 function (unit-testable); it updates the port when the block exists and inserts a
 fresh block under `llm-pi-ai: providers:` when it doesn't.
 
-## Optimal launch command
+## Optimal launch command (ik_llama, Qwen3.8-27B IQ4_KT/KS, 96K pure, 35.9 t/s)
 
 ```bash
 llama-server \
-  -m "G:/Ai/Models/Qwen3.6-27B.i1-IQ4/Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf" \
-  -c 98304 -ngl 99 -b 2048 -ub 512 \
-  --kv-unified --cache-type-k q4_0 --cache-type-v q4_0 \
-  -t 5 --flash-attn on --reasoning off --jinja \
-  --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 \
+  -m "G:/Ai/Models/Qwen3.8-27B_qkv-IQ4_KS-MTP/Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf" \
+  -c 98304 -np 1 -ngl 99 -b 1024 -ub 256 \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
+  -t 5 -tb 6 --flash-attn on --jinja --reasoning auto \
+  --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 \
+  --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload \
   --host 127.0.0.1 --port 8080
 ```
+
+For upstream llama.cpp with Qwen3.6-27B IQ4_XS, use `--reasoning off --kv-unified -b 2048 -ub 512` instead.

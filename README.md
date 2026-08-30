@@ -1,6 +1,14 @@
 # EngineBay — LLM Inference Server
 
-Local llama.cpp inference server with PyQt6 GUI launcher. Provides OpenAI-compatible API for Hermes CLI client and DeepSeek Harness GUI.
+![EngineBay Launcher](Screenshot/enginebay-launcher.png)
+
+Local llama.cpp inference server with PyQt6 GUI launcher, multi-engine support,
+and version management. Provides OpenAI-compatible API for Hermes CLI client
+and DeepSeek Harness GUI.
+
+**Primary model:** Qwen3.8-27B (IQ4_KT/KS / IQ4_XS, ~14 GB GGUF) on **RTX 4070 Ti SUPER
+(16 GB VRAM)**. Achieved: **35.9 t/s** at 96K context (pure mode, ik_llama.cpp),
+**~30x on repeated agent requests** (prompt cache in RAM, verified 26.5s warmup → 0.86s repeats).
 
 ## Features
 
@@ -26,8 +34,8 @@ llm-inference-server/
 ├── AGENTS.md                ← agent instruction file (engine table, build steps)
 ├── Launcher.vbs             ← launch GUI (no terminal)
 ├── Launcher.bat             ← launch GUI (fallback)
-├── start-llama.bat          ← start server (Qwen3.6-27B, upstream, port 8080)
-├── start-beellama.bat       ← start server (Qwen3.6-27B, BeeLlama KVarN, port 8080)
+├── start-llama.bat          ← start server (Qwen3.8-27B, upstream, port 8080)
+├── start-beellama.bat       ← start server (Qwen3.8-27B, BeeLlama KVarN, port 8080)
 ├── stop-llama.bat           ← stop server
 ├── launch-hermes-llama.bat  ← start server + Hermes
 ├── build-ikllama.bat        ← build ik_llama.cpp from source (manual-build engine)
@@ -64,7 +72,7 @@ in `settings.yaml` is ever touched. See [AGENTS.md](AGENTS.md#hermes--deepseek-h
 
 # EngineBay Technical Documentation
 
-Welcome to the technical documentation for the **LLM Inference Server**, a tailored, Windows-optimized `llama.cpp` inference environment equipped with a PyQt6 Graphical User Interface (GUI). This project is specifically engineered to run large hybrid dense models (like Qwen3.6-27B) natively on consumer-grade hardware (such as the RTX 4070 Ti SUPER with 16GB VRAM) while providing a seamless OpenAI-compatible API for CLI clients like Hermes.
+Welcome to the technical documentation for **EngineBay**, a tailored, Windows-optimized `llama.cpp` inference environment equipped with a PyQt6 Graphical User Interface (GUI). This project is specifically engineered to run large models (like Qwen3.8-27B in IQ4_XS / IQ4_KT/KS) natively on consumer-grade hardware (such as the RTX 4070 Ti SUPER with 16GB VRAM) while providing a seamless OpenAI-compatible API for CLI clients like Hermes and GUI clients like DeepSeek Harness.
 
 ---
 
@@ -97,10 +105,27 @@ The repository relies on a loosely coupled architecture separating the graphical
 3. **Integration Layer:**
    When settings change in the GUI, the application parses and mutates the YAML configuration of external agents (like Hermes) to ensure local endpoints are perfectly aligned with the running server.
 
-### Hardware & Model Optimization (Qwen3.6-27B)
-The server is explicitly configured around the unique physical architecture of **Qwen3.6-27B**, which is a **Hybrid Dense** model (not a Mixture of Experts / MoE):
-* **Layer Topology:** It consists of 64 total layers—48 DeltaNet layers (linear attention) and 16 GQA Attention layers. 
-* **KV Cache Economics:** Because DeltaNet layers do not require a traditional KV Cache, only 16 layers consume VRAM for context. This architectural quirk is what allows a 14GB quantized model to process a massive **96,000-token context window** while fitting entirely inside a 16GB RTX 4070 Ti SUPER.
+### Hardware & Model Optimization (Qwen3.8-27B — reference config)
+The server is configured around the capabilities of **Qwen3.8-27B** (qwen35
+architecture, GGUF). All three engines can run it, but only **ik_llama.cpp**
+reads the IQ4_KT/KS trellis quants used in the MTP variant:
+* **Measured decode (pure mode, 96K context, ik_llama):** **35.9 t/s** —
+  prompt eval 691 t/s (313 tokens). Fits entirely in 16 GB VRAM (CUDA0 buffer
+  ~12781 MiB constant, KV separate).
+* **MTP speculative decoding:** Up to 47.3 t/s at 48K context, but MTP head
+  (~216 MiB) + MTP KV (~72 MiB) overflows VRAM past 48K — **for ≥64K use pure.**
+* **Prompt cache (RAM):** Built-in via `--cache-ram 8192` (default on). Measured:
+  ~20K-token prefix — warmup 26.5 s, **repeats 0.86 s** (f_keep 1.00, 30965 cached
+  tokens). This is a ~30× speedup on repeated agent requests (e.g. Hermes
+  system prompt reused across turns).
+* **KV cache:** `--cache-type-k q4_0 --cache-type-v q4_0` (q2_0 crashes on this
+  model — 0xC0000409). KV at 64K = 1224 MiB, 96K = 1836 MiB.
+* **`-np 1` is mandatory** — auto-parallel creates 4 slots × 96K KV, which
+  overflows VRAM and drops speed to ~3.8 t/s.
+* **`--reasoning auto`** (not `off`) — qwen35 arch breaks with `--reasoning off`
+  on tools requests. `--jinja` is also required for tool use.
+* **FFN offload to CPU is counterproductive** — even 4 layers dropped decode
+  to 10.1 t/s (i7-5820K bottleneck). All layers on GPU is fastest.
 
 ---
 
@@ -120,12 +145,13 @@ The server is explicitly configured around the unique physical architecture of *
 3. *(Optional but Recommended)* Ensure `llama-server.exe` is either in your system PATH, or download it directly through the Launcher's built-in Version Manager.
 
 ### Critical Server Tuning & Constraints
-To achieve optimal performance (~34 tokens/sec decoding, ~58 tokens/sec prefilling), you **must** adhere to the following configuration constraints:
+To achieve optimal performance (**~35.9 tokens/sec decoding at 96K on ik_llama**,
+see the Hardware section above), you **must** adhere to the following configuration constraints:
 
-* **Optimal Context Limit (`-c 98304`):** 96K is the absolute optimal context. Pushing the context to 128K will catastrophically degrade decoding speeds (dropping from ~34 tok/s to ~6 tok/s).
-* **KV Cache Quantization (`--cache-type-k q4_0 --cache-type-v q4_0`):** Both Key and Value caches **must** be quantized to `q4_0` when running upstream llama.cpp. Using higher precision (like `q8_0`) at large contexts will exhaust VRAM and ruin generation speeds.
-* **CPU MoE Flag:** Do not use `--n-cpu-moe`. Qwen3.6-27B is a dense model; this flag will have no effect.
-* **Reasoning Off (`--reasoning off`):** Required to ensure fast, single-shot inference responses without inner-monologue delays.
+* **Optimal Context Limit (`-c 98304`):** 96K is the absolute optimal context. Pushing the context to 128K will degrade decoding speeds (measured 32.1 t/s vs 35.9 t/s).
+* **KV Cache Quantization (`--cache-type-k q4_0 --cache-type-v q4_0`):** Both Key and Value caches **must** be quantized to `q4_0`. Higher precision (like `q8_0`) at large contexts exhausts VRAM; `q2_0` crashes this model (0xC0000409).
+* **CPU MoE Flag:** Do not use `--n-cpu-moe`. Qwen3.8-27B is a dense model; this flag will have no effect.
+* **Reasoning mode:** On qwen35 (Qwen3.8-27B) use `--reasoning auto` + `--jinja` — `--reasoning off` breaks tools requests on this architecture. (Upstream Qwen3.6-27B still uses `--reasoning off`.)
 
 ### Alternative Engines (BeeLlama.cpp)
 
@@ -142,7 +168,7 @@ To use it:
 2. Set the **Engine** dropdown to `BeeLlama.cpp (fork)`
 3. **Check Updates** → download a Windows CUDA build (e.g. `v0.4.3-cuda-13.3`)
 4. Click **Use** to activate the binary
-5. Load the `Qwen3.6-27B (Bee KVarN)` preset — it swaps the KV cache to KVarN + 1024-token tail
+5. Load the `Qwen3.8-27B (Bee KVarN pure)` preset — it swaps the KV cache to KVarN + 1024-token tail
 
 Each engine keeps its own versions directory (`llama.cpp/versions/` vs `beellama.cpp/versions/`), so you can switch back and forth freely. See [AGENTS.md](AGENTS.md#alternative-engines) for how to register additional engines.
 
@@ -190,17 +216,25 @@ launch-hermes-llama.bat
 ```
 
 ### 3. CLI: The Optimal Launch Command
-If you are bypassing the GUI and scripting your own environment, use this optimized launch string for Qwen3.6-27B (IQ4_XS):
+If you are bypassing the GUI and scripting your own environment, use this
+optimized launch string for **Qwen3.8-27B on ik_llama.cpp** (96K pure,
+measured **35.9 t/s**). Note the flags differ from upstream llama.cpp —
+`--reasoning auto`, no `--kv-unified`, MTP omitted at ≥64K context:
 
 ```bash
 llama-server \
-  -m "G:/Ai/Models/Qwen3.6-27B.i1-IQ4/Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf" \
-  -c 98304 -ngl 99 -b 2048 -ub 512 \
-  --kv-unified --cache-type-k q4_0 --cache-type-v q4_0 \
-  -t 5 --flash-attn on --reasoning off --jinja \
-  --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 \
+  -m "G:/Ai/Models/Qwen3.8-27B_qkv-IQ4_KS-MTP/Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf" \
+  -c 98304 -np 1 -ngl 99 -b 1024 -ub 256 \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
+  -t 5 -tb 6 --flash-attn on --jinja --reasoning auto \
+  --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 \
+  --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload \
   --host 127.0.0.1 --port 8080
 ```
+
+For **Qwen3.8-27B IQ4_XS** (readable by any engine, incl. upstream llama.cpp):
+`-m ".../qwen3.8-27b-IQ4_XS-pure.gguf"` with the same params, but upstream
+llama.cpp accepts `--reasoning off` and `--kv-unified`.
 
 ### 4. Running the Smoke Test
 To verify that your server is running, healthy, and successfully exposing the OpenAI-compatible API, execute the built-in Python diagnostic tool:
