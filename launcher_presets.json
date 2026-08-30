@@ -30,12 +30,12 @@
     "port": "8080"
   },
   "Qwen3.8-27B (ik_llama MTP)": {
-    "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --spec-type mtp:n_max=2 --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
+    "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --spec-type mtp:n_max=2 --jinja --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
     "port": "8080"
   },
   "Qwen3.8-27B (ik_llama pure)": {
-    "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
+    "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --jinja --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
     "port": "8080"
   },

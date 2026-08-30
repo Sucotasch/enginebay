@@ -161,9 +161,9 @@ ENGINES = {
         "manual_build": True,
         "build_script": "build-ikllama.bat",
         "default_params": (
-            "-c 98304 -ngl 99 -b 2048 -ub 512 "
+            "-c 98304 -ngl 99 -b 1024 -ub 256 "
             "--cache-type-k q4_0 --cache-type-v q4_0 "
-            "-t 5 --flash-attn on --reasoning auto "
+            "-t 5 --flash-attn on --jinja --reasoning auto "
             "--temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64"
         ),
         # Flags that THIS engine does NOT support — used to detect stale params
@@ -1134,6 +1134,7 @@ class LLMLauncher(QMainWindow):
                 argv,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                           | subprocess.CREATE_NO_WINDOW
             )
         except Exception as e:
             self._log(f"Launch error: {e}")
