@@ -157,21 +157,26 @@ ENGINES = {
         "repo": "ikawrakow/ik_llama.cpp",
         "api": "https://api.github.com/repos/ikawrakow/ik_llama.cpp/releases",
         "versions_dir": SCRIPT_DIR / "ik_llama.cpp" / "versions",
-        "classify": None,          # no prebuilt binaries — build from source
-        "manual_build": True,      # show build instructions instead of update list
+        "classify": None,
+        "manual_build": True,
         "build_script": "build-ikllama.bat",
         "default_params": (
             "-c 98304 -ngl 99 -b 2048 -ub 512 "
-            "--kv-unified --cache-type-k q4_0 --cache-type-v q4_0 "
-            "-t 5 --flash-attn on --reasoning off "
+            "--cache-type-k q4_0 --cache-type-v q4_0 "
+            "-t 5 --flash-attn on --reasoning auto "
             "--temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64"
         ),
+        # Flags that THIS engine does NOT support — used to detect stale params
+        # when loading a saved config that was written by a different engine.
+        "incompatible_params": ("--kv-unified", "kvarn", "--kv-tail-tokens",
+                                "--spec-draft-n-max", "draft-mtp"),
     },
 }
 
 DEFAULT_ENGINE = "llama.cpp"
 ENGINES[DEFAULT_ENGINE]["versions_dir"].mkdir(parents=True, exist_ok=True)
 ENGINES["beellama.cpp"]["versions_dir"].mkdir(parents=True, exist_ok=True)
+ENGINES["ik_llama.cpp"]["versions_dir"].mkdir(parents=True, exist_ok=True)
 
 # Backward-compatible aliases
 VERSIONS_DIR = ENGINES["llama.cpp"]["versions_dir"]
@@ -864,6 +869,9 @@ class LLMLauncher(QMainWindow):
     def _on_engine_changed(self):
         eng = self._current_engine()
         self._log(f"Engine: {eng['label']} — versions: {eng['versions_dir']}")
+        # Load the new engine's default params — previous params are engine-specific
+        # and may contain unsupported flags (e.g. beellama's kvarn5, --kv-unified).
+        self.params_text.setPlainText(eng["default_params"])
         self._refresh_versions_list()
         # Persist engine selection so it survives restarts
         save_config({**self.cfg, "engine_id": self._current_engine_id()})
@@ -1312,6 +1320,17 @@ class LLMLauncher(QMainWindow):
                     self.engine_combo.setCurrentIndex(idx)
                     self.engine_combo.blockSignals(False)
                     self._refresh_versions_list()
+
+            # Detect stale params written by a different engine and reset them
+            # to this engine's defaults, so an old preset doesn't crash launch.
+            saved_params = self.cfg.get("params", "")
+            if engine_id in ENGINES and saved_params:
+                eng = ENGINES[engine_id]
+                incompat = eng.get("incompatible_params")
+                if incompat and any(tok in saved_params for tok in incompat):
+                    self._log(f"Params from a different engine detected — "
+                              f"loading {eng['label']} defaults")
+                    self.params_text.setPlainText(eng["default_params"])
 
 
 def main():
