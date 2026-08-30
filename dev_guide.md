@@ -233,8 +233,16 @@ RTX 3090 24GB, 150K контекст. **Референс-ориентир ско
 7. **Пресеты не хранят модель** — только params/host/port. Это требование
    пользователя: пресет применяет параметры к тому, что выбрано в GUI.
 8. **Порты:** 8080 = Qwen3.6/3.8, 8888 = Gemma/Agentic. Не смешивать.
-9. **Hermes:** launcher автосинхронизирует `~/.hermes/config.yaml`
-   (provider `local-llama`, base_url http://127.0.0.1:PORT/v1, model "Local Model").
+9. **Клиентская интеграция (Hermes + DSH):** launcher автосинхронизирует
+   `~/.hermes/config.yaml` (provider `local-llama`, base_url
+   http://127.0.0.1:PORT/v1, model "Local Model") И `~/.dsh/settings.yaml`
+   (provider `local_llama` под `llm-pi-ai.providers`, поле `baseURL`).
+   Механизм DSH-синка: `_dsh_upsert_local_llama(content, host, port)` —
+   чистая модульная функция; обновляет порт в существующем блоке и вставляет
+   новый блок, если его нет. Трогается ТОЛЬКО блок `local_llama` — остальные
+   провайдеры и top-level секции не изменяются (проверено diff'ом: 181 строка
+   без изменений). settings.yaml пользователя читается через PyYAML-валидацию
+   после записи; при ручных правках хранить бэкап `settings.yaml.pre-*`.
 
 ---
 

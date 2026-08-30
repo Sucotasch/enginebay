@@ -1,6 +1,6 @@
-# LLM Inference Server
+# EngineBay — LLM Inference Server
 
-Local llama.cpp inference server with PyQt6 GUI launcher. Provides OpenAI-compatible API for Hermes CLI client.
+Local llama.cpp inference server with PyQt6 GUI launcher. Provides OpenAI-compatible API for Hermes CLI client and DeepSeek Harness GUI.
 
 ## Features
 
@@ -10,6 +10,7 @@ Local llama.cpp inference server with PyQt6 GUI launcher. Provides OpenAI-compat
 - **Multi-engine support** — select between upstream llama.cpp, BeeLlama.cpp (fork), and ik_llama.cpp (fork, source-built) with per-engine version management, download, and activation
 - **Engine-safe presets** — presets carry params/host/port only (never model paths); incompatible flags are auto-detected when switching engines or loading presets, with a warning dialog instead of a crash
 - **Health monitor** — real-time server status in the GUI
+- **Hermes + DeepSeek Harness sync** — auto-registers the running server as a local provider in both `~/.hermes/config.yaml` and `~/.dsh/settings.yaml`, keeping the port in sync when you change it in the GUI
 
 > Engineering notes, measured VRAM budgets, engine flag differences, and build
 > gotchas live in **[dev_guide.md](dev_guide.md)**.
@@ -48,7 +49,20 @@ llm-inference-server/
 └── pyproject.toml
 ```
 
-# LLM Inference Server Technical Documentation
+## Client integration (Hermes + DeepSeek Harness)
+
+The launcher auto-registers the running server as a local provider in **both**
+clients, and port changes in the GUI auto-sync to both configs:
+
+| Client | Config | Provider | Sync mechanism |
+|---|---|---|---|
+| **Hermes** CLI | `~/.hermes/config.yaml` | `local-llama` | `_on_port_changed` → regex update of `base_url` |
+| **DeepSeek Harness** GUI | `~/.dsh/settings.yaml` | `local_llama` (under `llm-pi-ai.providers`) | `_on_port_changed` → `_dsh_upsert_local_llama()` block-scoped update of `baseURL` |
+
+The provider is created on first launch if missing; only the `local_llama` block
+in `settings.yaml` is ever touched. See [AGENTS.md](AGENTS.md#hermes--deepseek-harness-integration).
+
+# EngineBay Technical Documentation
 
 Welcome to the technical documentation for the **LLM Inference Server**, a tailored, Windows-optimized `llama.cpp` inference environment equipped with a PyQt6 Graphical User Interface (GUI). This project is specifically engineered to run large hybrid dense models (like Qwen3.6-27B) natively on consumer-grade hardware (such as the RTX 4070 Ti SUPER with 16GB VRAM) while providing a seamless OpenAI-compatible API for CLI clients like Hermes.
 
@@ -63,7 +77,7 @@ The application acts as a comprehensive wrapper and manager for local LLM infere
 * **Auto-Discovery Engine:** Intelligently locates essential dependencies without manual configuration:
   * Automatically finds existing `llama-server` binaries (via environment variables like `LLAMA_SERVER_PATH`, system `PATH`, or within LM Studio's cache).
   * Auto-discovers the Hermes CLI configuration directory (`~/.hermes/config.yaml`).
-* **Hermes CLI Integration:** Automatically registers and updates the server as a local provider (`local-llama` or `local-qwen`) in the Hermes configuration, keeping API ports synchronized.
+* **Hermes + DeepSeek Harness Integration:** Automatically registers and updates the server as a local provider in both `~/.hermes/config.yaml` (`local-llama`) and `~/.dsh/settings.yaml` (`local_llama`), keeping API ports synchronized. The provider is created on first launch if missing.
 * **Console-Free Execution:** Utilizes VBScript (`Launcher.vbs`) to start the server and GUI silently in the background, preventing terminal clutter.
 * **Health & Status Monitoring:** Built-in polling to verify if the inference server is responding and healthy.
 

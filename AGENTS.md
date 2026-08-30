@@ -89,19 +89,22 @@ Auto-discovered from:
 4. Common install locations
 5. Installed engine versions (via the "Use" button in the GUI)
 
-## Hermes integration
+## Hermes + DeepSeek Harness integration
 
-Launcher auto-registers `local-llama` provider in `~/.hermes/config.yaml`. Port changes in the GUI auto-sync to the Hermes config.
+Launcher auto-registers the server as a local provider in BOTH clients, and
+port changes in the GUI auto-sync to both configs:
 
-```yaml
-# ~/.hermes/config.yaml (auto-managed)
-providers:
-  local-llama:
-    base_url: http://127.0.0.1:8888/v1
-    api_key: not-needed
-    models:
-    - Local Model
-```
+| Client | Config | Provider | Sync mechanism |
+|---|---|---|---|
+| Hermes CLI | `~/.hermes/config.yaml` | `local-llama` | `_on_port_changed` → regex update of `base_url` |
+| DeepSeek Harness GUI | `~/.dsh/settings.yaml` | `local_llama` (under `llm-pi-ai.providers`) | `_on_port_changed` → `_dsh_upsert_local_llama()` block-scoped update of `baseURL` |
+
+The provider is created on first launch if missing. DSH settings.yaml is a
+user-owned config — only the `local_llama` block is ever touched, and `_ensure_dsh_provider()`
+backs up nothing itself: always keep `~/.dsh/settings.yaml.pre-*` backups if you
+hand-edit it. `_dsh_upsert_local_llama(content, host, port)` is a pure module-level
+function (unit-testable); it updates the port when the block exists and inserts a
+fresh block under `llm-pi-ai: providers:` when it doesn't.
 
 ## Optimal launch command
 

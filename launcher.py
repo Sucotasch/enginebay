@@ -1,7 +1,7 @@
 """
-LLM Launcher — GUI for launching llama-server with model selection and parameters.
+EngineBay — GUI launcher for launching llama-server with model selection and parameters.
 Dependencies: Python 3 + PyQt6.
-Portable — auto-discovers Hermes and llama-server.
+Portable — auto-discovers Hermes, DeepSeek Harness and llama-server.
 """
 import json
 import os
@@ -49,6 +49,45 @@ def find_hermes_home() -> Path | None:
 
 HERMES_HOME = find_hermes_home()
 HERMES_CONFIG = HERMES_HOME / "config.yaml" if HERMES_HOME else None
+
+# --- Auto-discover DeepSeek Harness ---
+def find_dsh_settings() -> Path | None:
+    p = Path.home() / ".dsh" / "settings.yaml"
+    return p if p.exists() else None
+
+
+DSH_SETTINGS = find_dsh_settings()
+
+
+def _dsh_upsert_local_llama(content: str, host: str, port: str) -> tuple[str, bool]:
+    """Insert or update the local_llama provider block in DSH settings.yaml text.
+
+    Returns (new_content, created). Only the local_llama block is touched —
+    all other providers and top-level keys stay byte-identical.
+    """
+    # Update path: block exists → rewrite its baseURL port only.
+    block_re = re.compile(r"(    local_llama:.*?)(?=\n    \S|\n  \S|\Z)", re.DOTALL)
+    m = block_re.search(content)
+    if m:
+        block = m.group(1)
+        new_block = re.sub(r"(baseURL:\s*http://[^:]+):\d+", f"\\1:{port}", block, count=1)
+        if new_block != block:
+            return content[:m.start()] + new_block + content[m.end():], False
+        return content, False
+
+    # Create path: no local_llama yet → insert under llm-pi-ai.providers.
+    marker = "llm-pi-ai:\n  providers:"
+    if marker not in content:
+        return content, False
+    block = (
+        "\n    local_llama:\n"
+        f"      displayName: local-llama\n"
+        f"      api: openai-completions\n"
+        f"      baseURL: http://{host}:{port}/v1\n"
+        f"      models:\n"
+        f"        - id: Local Model"
+    )
+    return content.replace(marker, marker + block, 1), True
 
 # --- Auto-discover llama-server ---
 def find_llama_server() -> Path | None:
@@ -435,7 +474,7 @@ class LLMLauncher(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LLM Launcher — llama-server")
+        self.setWindowTitle("EngineBay — LLM Launcher")
         self.setMinimumSize(700, 500)
         self.resize(820, 850)
 
@@ -460,6 +499,7 @@ class LLMLauncher(QMainWindow):
 
         self._ensure_provider()
         self._load_saved_state()
+        self._ensure_dsh_provider()
         self._start_health_monitor()
 
     def _ensure_provider(self):
@@ -505,6 +545,32 @@ class LLMLauncher(QMainWindow):
             self._log(f"Provider local-llama added to {HERMES_CONFIG}")
         except Exception as e:
             self._log(f"Cannot write config: {e}")
+
+    def _ensure_dsh_provider(self):
+        """Ensure DeepSeek Harness settings.yaml carries a local_llama provider
+        pointing at this server. Updates the baseURL port in place when the block
+        exists; inserts a fresh block under llm-pi-ai.providers when missing.
+        Only the local_llama block is touched — other providers stay intact."""
+        if not DSH_SETTINGS:
+            self._log("DeepSeek Harness settings.yaml not found - provider not registered")
+            return
+        port = self.port_entry.text().strip() or PORT
+        host = self.host_entry.text().strip() or HOST
+        try:
+            content = DSH_SETTINGS.read_text(encoding="utf-8")
+        except Exception as e:
+            self._log(f"Cannot read {DSH_SETTINGS}: {e}")
+            return
+        new_content, created = _dsh_upsert_local_llama(content, host, port)
+        if new_content != content:
+            try:
+                DSH_SETTINGS.write_text(new_content, encoding="utf-8")
+                if created:
+                    self._log(f"DSH: provider local_llama added ({host}:{port})")
+                else:
+                    self._log(f"DSH: local_llama port -> {port}")
+            except Exception as e:
+                self._log(f"Cannot write {DSH_SETTINGS}: {e}")
 
     # ── UI ──────────────────────────────────────────────────────────
 
@@ -1307,21 +1373,31 @@ class LLMLauncher(QMainWindow):
         self._update_preview()
         port = self.port_entry.text().strip()
         host = self.host_entry.text().strip() or HOST
-        if not port or not HERMES_CONFIG:
+        if not port:
             return
-        try:
-            content = HERMES_CONFIG.read_text(encoding="utf-8")
-            new_content = re.sub(
-                r'(local-llama:.*?base_url:\s+)http://([^:]+):\d+',
-                f'\\1http://\\2:{port}',
-                content,
-                flags=re.DOTALL
-            )
-            if new_content != content:
-                HERMES_CONFIG.write_text(new_content, encoding="utf-8")
-                self._log(f"Hermes: port -> {port}")
-        except Exception:
-            pass
+        if HERMES_CONFIG:
+            try:
+                content = HERMES_CONFIG.read_text(encoding="utf-8")
+                new_content = re.sub(
+                    r'(local-llama:.*?base_url:\s+)http://([^:]+):\d+',
+                    f'\\1http://\\2:{port}',
+                    content,
+                    flags=re.DOTALL
+                )
+                if new_content != content:
+                    HERMES_CONFIG.write_text(new_content, encoding="utf-8")
+                    self._log(f"Hermes: port -> {port}")
+            except Exception:
+                pass
+        if DSH_SETTINGS:
+            try:
+                content = DSH_SETTINGS.read_text(encoding="utf-8")
+                new_content, _ = _dsh_upsert_local_llama(content, host, port)
+                if new_content != content:
+                    DSH_SETTINGS.write_text(new_content, encoding="utf-8")
+                    self._log(f"DSH: port -> {port}")
+            except Exception:
+                pass
 
     def _update_preview(self):
         model = self.model_entry.text().strip()
