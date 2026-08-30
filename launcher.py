@@ -134,6 +134,57 @@ def resolve_param_paths(params: str) -> str:
         i += 1
     return shlex.join(out) if out else params
 
+
+def send_to_recycle_bin(path: str) -> bool:
+    """Move a file/directory to the Windows Recycle Bin (undo-able delete).
+
+    Uses SHFileOperationW with FOF_ALLOWUNDO so the user can restore the
+    version from the Recycle Bin if they delete it by mistake. Returns True
+    on success; on any failure (non-Windows, API error) returns False and the
+    caller must NOT fall back to a permanent delete without warning.
+    """
+    if not path or not os.path.exists(path):
+        return False
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        FO_DELETE = 3
+        FOF_ALLOWUNDO = 0x40
+        FOF_NOCONFIRMATION = 0x10
+        FOF_SILENT = 0x4
+
+        class SHFILEOPSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", wintypes.HWND),
+                ("wFunc", wintypes.UINT),
+                ("pFrom", wintypes.LPCWSTR),
+                ("pTo", wintypes.LPCWSTR),
+                ("fFlags", ctypes.c_ushort),
+                ("fAnyOperationsAborted", wintypes.BOOL),
+                ("hNameMappings", wintypes.LPVOID),
+                ("lpszProgressTitle", wintypes.LPCWSTR),
+            ]
+
+        # SHFileOperationW requires a double null-terminated path string.
+        pfrom = ctypes.create_unicode_buffer(str(path) + "\0")
+        op = SHFILEOPSTRUCTW()
+        op.hwnd = None
+        op.wFunc = FO_DELETE
+        op.pFrom = ctypes.cast(pfrom, wintypes.LPCWSTR)
+        op.pTo = None
+        op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+        op.fAnyOperationsAborted = False
+        op.hNameMappings = None
+        op.lpszProgressTitle = None
+
+        result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        return result == 0 and not op.fAnyOperationsAborted
+    except Exception:
+        return False
+
 # --- Auto-discover llama-server ---
 def find_llama_server() -> Path | None:
     env_path = os.environ.get("LLAMA_SERVER_PATH")
@@ -1248,11 +1299,22 @@ class LLMLauncher(QMainWindow):
         if v["active"]:
             QMessageBox.warning(self, "Error", "Cannot delete active version.")
             return
-        reply = QMessageBox.question(self, "Delete?", f"Delete {v['name']}?")
+        reply = QMessageBox.question(
+            self, "Delete?",
+            f"Delete {v['name']}?\n\nIt will be moved to the Windows Recycle Bin "
+            f"(you can restore it later)."
+        )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                shutil.rmtree(v["dir"])
-                self._log(f"\U0001f5d1 {v['name']} deleted")
+                if send_to_recycle_bin(v["dir"]):
+                    self._log(f"\U0001f5d1 {v['name']} moved to Recycle Bin (restorable)")
+                else:
+                    QMessageBox.warning(
+                        self, "Not deleted",
+                        f"Could not move {v['name']} to the Recycle Bin.\n"
+                        f"Nothing was deleted - try again or delete it manually."
+                    )
+                    self._log(f"{v['name']} NOT deleted (recycle bin failed)")
                 self._refresh_versions_list()
             except Exception as e:
                 self._log(f"Delete error: {e}")

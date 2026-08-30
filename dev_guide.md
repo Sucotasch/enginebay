@@ -67,7 +67,7 @@
 |---|---|---|---|
 | KV cache | `--kv-unified --cache-type-k q4_0 --cache-type-v q4_0` | `--kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024` | `--cache-type-k q4_0 --cache-type-v q4_0` (НЕТ `--kv-unified`) |
 | Спекуляция | — | `--spec-draft-n-max 2 draft-mtp` | `--spec-type ngram-mod:... --spec-type mtp:...` (двухстадийная цепочка) |
-| Reasoning | `--reasoning off` | `--reasoning off` | `--reasoning auto` (qwen35 ломается с `off`) |
+| Reasoning | qwen35: `--reasoning auto` (НЕ `off` — ломает tools); Qwen3.6-27B/Gemma: `--reasoning off` | как upstream | как upstream |
 | Jinja | `--jinja` | `--jinja` | `--jinja` — ОБЯЗАТЕЛЕН (tools) |
 | Batch | `-b 2048 -ub 512` | `-b 2048 -ub 512` | `-b 1024 -ub 256` |
 | Auto-offload | — | — | `--fit`, `--fit-margin N`, `--override-tensor "regex=CPU"` (ПРОБЕЛ, не `=`) |
@@ -118,6 +118,48 @@
 ```
 Проверено end-to-end: tools-запрос → `reasoning_content` + `tool_calls`,
 35.87 t/s. Hermes съедает ~20K контекста → ~76K полезного.
+
+---
+
+## 3b. Трюк с `--override-tensor` (FFN offload под VRAM)
+
+**Источник:** Reddit-комментарий про offload FFN-слоёв на CPU (проверено нами
+на upstream llama.cpp b10701, 30.08.2026).
+
+**Архитектура Qwen3.8-27B (qwen35) — гибридная, это важно:**
+- 64 рабочих слоя (0–63) + `blk.64` (MTP-голова, в pure не используется).
+- **Каждый 4-й слой** (`4k+3`: 3, 7, 11, … 63) — Gated Attention, остальные —
+  DeltaNet/SSM. Тензоры: `attn_qkv/ssm_*` (SSM-слои) vs `attn_q/k/v/output`
+  (attention-слои).
+- FFN-тензоры (`ffn_gate/ffn_down/ffn_up`) — **~135 MB на слой**.
+- **Не скидывать на CPU:** ранние слои 0–7 и attention-слои. Скидывать FFN
+  средних/поздних слоёв.
+
+**Когда помогает:** модель + KV не влезают в 16GB VRAM → декод-граф частично
+уходит на CPU и скорость падает (upstream b10701: 11.5 t/s). Offload 8 FFN
+слоёв освобождает ~1.08 GB и возвращает скорость.
+
+**Рабочий вариант (8 слоёв, ~1.08 GB):**
+```
+--override-tensor "blk\.(6|14|22|30|38|46|54|62)\.ffn_.*=CPU"
+```
+Другие: 4 слоя `blk\.(14|30|46|62)` (~0.54 GB, впритык), 16 слоёв
+`blk\.(2|6|10|14|18|22|26|30|34|38|42|46|50|54|58|62)` (~2.2 GB).
+
+**Результаты на upstream b10701 (96K pure, IQ4_XS, 30.08.2026):**
+- без override: **11.5 t/s**
+- 8 FFN на CPU: **13.5 t/s** (+18%)
+- + `--load-mode none` (движок советует при mmap+override): **13.35 t/s** —
+  заметной разницы нет, флаг необязателен.
+
+**Важные оговорки:**
+- Трюк **чинит нехватку VRAM**, а не ускоряет сам по себе. На ik_llama (96K
+  pure, всё влезает) offload FFN наоборот убивает скорость (см. §3: 8 слоёв →
+  5.68 t/s) — там override не нужен.
+- Upstream официальный билд (LLVM/CUDA 13.3) — самый медленный движок на этой
+  модели даже с override: 13.5 vs 23.8 (beellama-msvc) vs 35.9 (ik_llama).
+  Для повседневной работы beellama-msvc / ik_llama.
+- В пресете `Qwen3.8-27B (llama.cpp upstream)` override уже прописан.
 
 ---
 
