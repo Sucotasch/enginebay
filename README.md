@@ -26,15 +26,17 @@ and DeepSeek Harness GUI.
 ## Project Structure
 
 ```
-llm-inference-server/
+enginebay/
 ├── launcher.py              ← PyQt6 GUI (model selection, presets, engines, versions)
-├── launcher_presets.json    ← saved configs (incl. BeeLlama KVarN, ik_llama presets)
+├── launcher_presets.json    ← saved presets (params only — no model paths)
 ├── launcher_config.json     ← last used config (git-ignored)
+├── requirements.txt         ← Python dependencies
+├── setup-deps.bat           ← one-time dependency installer
 ├── dev_guide.md             ← engineering notes, VRAM budgets, engine flags, gotchas
 ├── AGENTS.md                ← agent instruction file (engine table, build steps)
 ├── Launcher.vbs             ← launch GUI (no terminal)
 ├── Launcher.bat             ← launch GUI (fallback)
-├── start-llama.bat          ← start server (Qwen3.8-27B, upstream, port 8080)
+├── start-llama.bat          ← start server (ik_llama, Qwen3.8-27B, port 8080)
 ├── start-beellama.bat       ← start server (Qwen3.8-27B, BeeLlama KVarN, port 8080)
 ├── stop-llama.bat           ← stop server
 ├── launch-hermes-llama.bat  ← start server + Hermes
@@ -49,6 +51,8 @@ llm-inference-server/
 ├── benchmarks/
 │   ├── bench.sh             ← TTFT/TPOT benchmark
 │   └── systematic_bench.py  ← automated config testing
+├── Screenshot/
+│   └── enginebay-launcher.png ← GUI screenshot
 ├── llama.cpp/versions/      ← downloaded upstream llama.cpp releases
 ├── beellama.cpp/            ← BeeLlama source checkout (reference)
 │   └── versions/            ← downloaded BeeLlama releases
@@ -138,11 +142,13 @@ reads the IQ4_KT/KS trellis quants used in the MTP variant:
 
 ### Setup Process
 1. Clone the repository to your local machine.
-2. Install the necessary Python dependencies for the GUI and testing scripts:
+2. Install the necessary Python dependencies — either double-click `setup-deps.bat`
+   or run manually:
    ```bash
-   pip install PyQt6 openai psutil
+   pip install -r requirements.txt
    ```
-3. *(Optional but Recommended)* Ensure `llama-server.exe` is either in your system PATH, or download it directly through the Launcher's built-in Version Manager.
+   (Packages: `PyQt6`, `openai`, `httpx` — see `requirements.txt`.)
+3. *(Optional but Recommended)* Ensure `llama-server.exe` is either in your system PATH, or download it directly through the Launcher's built-in Version Manager. The **ik_llama.cpp** engine has no prebuilt binaries — use `build-ikllama.bat` to build it (the release archive ships it pre-built).
 
 ### Critical Server Tuning & Constraints
 To achieve optimal performance (**~35.9 tokens/sec decoding at 96K on ik_llama**,
@@ -223,7 +229,7 @@ measured **35.9 t/s**). Note the flags differ from upstream llama.cpp —
 
 ```bash
 llama-server \
-  -m "G:/Ai/Models/Qwen3.8-27B_qkv-IQ4_KS-MTP/Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf" \
+  -m "/path/to/Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf" \
   -c 98304 -np 1 -ngl 99 -b 1024 -ub 256 \
   --cache-type-k q4_0 --cache-type-v q4_0 \
   -t 5 -tb 6 --flash-attn on --jinja --reasoning auto \

@@ -115,7 +115,7 @@ fresh block under `llm-pi-ai: providers:` when it doesn't.
 
 ```bash
 llama-server \
-  -m "G:/Ai/Models/Qwen3.8-27B_qkv-IQ4_KS-MTP/Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf" \
+  -m "/path/to/Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf" \
   -c 98304 -np 1 -ngl 99 -b 1024 -ub 256 \
   --cache-type-k q4_0 --cache-type-v q4_0 \
   -t 5 -tb 6 --flash-attn on --jinja --reasoning auto \

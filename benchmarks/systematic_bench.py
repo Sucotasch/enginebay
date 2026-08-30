@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Systematic benchmark for Qwen3.6-27B IQ4_XS on RTX 4070 Ti SUPER.
+Systematic benchmark for Qwen3.8-27B IQ4_KT/KS on RTX 4070 Ti SUPER (ik_llama.cpp).
 Tests different configurations to find optimal speed/quality tradeoff.
+
+Portability: LLAMA_SERVER and MODEL come from env vars (no hardcoded paths):
+    set LLAMA_SERVER=D:\path\to\ik_llama\llama-server.exe
+    set MODEL=G:\Ai\Models\Qwen3.8-27B_qkv-IQ4_KS-MTP\Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf
 """
 import subprocess
 import time
@@ -10,8 +14,11 @@ import sys
 import os
 import signal
 
-LLAMA_SERVER = r"C:\Users\sucot\.cache\lm-studio\extensions\backends\llama.cpp-win-x86_64-nvidia-cuda12-avx2-2.20.1\llama-server.exe"
-MODEL = r"G:\Ai\Models\Qwen3.6-27B.i1-IQ4\Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf"
+LLAMA_SERVER = os.environ.get("LLAMA_SERVER", r"C:\path\to\llama-server.exe")
+MODEL = os.environ.get(
+    "MODEL",
+    r"G:\Ai\Models\Qwen3.8-27B_qkv-IQ4_KS-MTP\Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf",
+)
 PORT = 8099  # Use different port to avoid conflicts
 
 TEST_PROMPT = "Write a detailed 500-word essay about the history of artificial intelligence."

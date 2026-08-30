@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke test — verify llama-server with Qwen3.6-27B IQ4_XS.
+Smoke test — verify llama-server with Qwen3.8-27B.
 Run: python scripts/smoke_test.py
 """
 import os
@@ -16,7 +16,7 @@ except ImportError:
 
 def main():
     base_url = os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:8080/v1")
-    model = os.getenv("MODEL_NAME", "Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf")
+    model = os.getenv("MODEL_NAME", "Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf")
     api_key = os.getenv("OPENAI_API_KEY", "not-needed")
 
     print(f"Connecting to: {base_url}")

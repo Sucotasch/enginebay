@@ -1,10 +1,13 @@
-# Запуск Qwen3.6-27B как провайдер Hermes
+# Запуск Qwen3.8-27B как провайдер Hermes
+
+> Проект: **EngineBay** — репозиторий https://github.com/Sucotasch/enginebay
+> Основная модель: `Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf` (ik_llama.cpp)
 
 ## Быстрый старт (один клик)
 
-### Windows CMD:
+### Windows CMD (из папки проекта):
 ```bat
-"D:\Arx\Software Downloads\Hermes copy\llm-inference-server\launch-hermes-llama.bat"
+launch-hermes-llama.bat
 ```
 
 ### Что делает:
@@ -16,59 +19,64 @@
 
 ### Шаг 1: Запустить сервер
 ```bat
-"D:\Arx\Software Downloads\Hermes copy\llm-inference-server\start-llama.bat"
+start-llama.bat
 ```
+> Перед запуском укажите путь к модели:
+> `set MODEL_GGUF=G:\Ai\Models\Qwen3.8-27B_qkv-IQ4_KS-MTP\Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf`
 
 ### Шаг 2: Запустить Hermes
 ```bash
-hermes --provider local-qwen --model Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf
+hermes --provider local-llama --model Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf
 ```
 
 ### Шаг 3: Остановить сервер
 ```bat
-"D:\Arx\Software Downloads\Hermes copy\llm-inference-server\stop-llama.bat"
+stop-llama.bat
 ```
 
 ## Конфиг Hermes
 
-Провайдер `local-qwen` добавлен в `~/.hermes/config.yaml`:
+Провайдер `local-llama` автоматически регистрируется в `~/.hermes/config.yaml`
+(см. AGENTS.md → Hermes + DeepSeek Harness integration):
 
 ```yaml
 providers:
-  local-qwen:
+  local-llama:
     base_url: http://127.0.0.1:8080/v1
     api_key: not-needed
     models:
-      - Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf
+      - Local Model
 ```
 
 ## Переключение провайдеров
 
 ### В Hermes chat:
 ```
-/model local-qwen/Qwen3.6-27B.i1-IQ4_XS-attn_qkv-IQ4_XS.gguf
+/model local-llama/Local Model
 ```
 
 ### Или через CLI:
 ```bash
-hermes --provider local-qwen -q "Привет, как дела?"
+hermes --provider local-llama -q "Привет, как дела?"
 ```
 
-## Производительность
+## Производительность (ik_llama.cpp, verified 2026-08)
 
 | Метрика | Значение |
 |---------|----------|
 | Контекст | 96K (98304) |
-| Decode | ~34 tok/s |
-| Prefill | ~58 tok/s |
-| VRAM | ~15.9 GB / 16 GB |
+| Decode | ~35.9 tok/s |
+| Prefill | ~691 tok/s (313 tok) |
+| VRAM | ~14.6 GB / 16 GB |
 | Порт | 8080 |
+| Prompt cache | 26.5s warmup → 0.86s повтор (~30x) |
 
 ## Файлы
 
 ```
-llm-inference-server/
-├── start-llama.bat          ← запуск сервера
+enginebay/
+├── start-llama.bat          ← запуск сервера (ik_llama, порт 8080)
+├── start-beellama.bat       ← запуск BeeLlama (KVarN, порт 8080)
 ├── stop-llama.bat           ← остановка сервера
 ├── launch-hermes-llama.bat  ← запуск Hermes + сервер
 ├── configs/
@@ -84,10 +92,7 @@ llm-inference-server/
 ## Troubleshooting
 
 ### Сервер не запускается
-- Проверьте что llama-server.exe существует:
-  ```
-  dir "C:\Users\sucot\.cache\lm-studio\extensions\backends\llama.cpp-win-x86_64-nvidia-cuda12-avx2-2.20.1\llama-server.exe"
-  ```
+- Проверьте что llama-server.exe существует (см. `start-llama.bat`, переменная `LLAMA_SERVER`)
 - Проверьте что порт 8080 свободен:
   ```
   netstat -an | findstr 8080
@@ -101,4 +106,5 @@ llm-inference-server/
 ### Медленная генерация
 - Убедитесь что используется 96K контекст (не 128K!)
 - Проверьте VRAM: `nvidia-smi`
-- Убедитесь что reasoning off: `--reasoning off`
+- На Qwen3.8 (qwen35) нужен `--reasoning auto` + `--jinja` (не `off`)
+- `-np 1` обязателен — авто-параллель даёт 4 слота и падение до ~3.8 tok/s

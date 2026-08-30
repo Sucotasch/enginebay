@@ -1,0 +1,5 @@
+# EngineBay — runtime dependencies
+# Core launcher needs only PyQt6; the smoke test additionally uses openai.
+PyQt6>=6.6
+openai>=1.30
+httpx>=0.27
