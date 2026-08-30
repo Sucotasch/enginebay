@@ -16,3 +16,6 @@ engines/
 vllm_research/
 
 qwen3090_research/
+
+# Release zips (581 MB — published as GitHub release asset, not tracked)
+enginebay-*.zip
