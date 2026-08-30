@@ -131,6 +131,19 @@ reads the IQ4_KT/KS trellis quants used in the MTP variant:
 * **FFN offload to CPU is counterproductive** — even 4 layers dropped decode
   to 10.1 t/s (i7-5820K bottleneck). All layers on GPU is fastest.
 
+### Model downloads (Hugging Face)
+
+| Model | Variant | Engines | Notes |
+|---|---|---|---|
+| [cHunter789/Qwen3.8-27B-i1-IQ4_KS_KT-GGUF](https://huggingface.co/cHunter789/Qwen3.8-27B-i1-IQ4_KS_KT-GGUF) | IQ4_KT/KS (MTP) | **ik_llama.cpp only** | Trellis quants (ggml 144/145) — our primary `Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf` |
+| [jpetrina/Qwen3.8-27B-IQ4_XS-pure-GGUF](https://huggingface.co/jpetrina/Qwen3.8-27B-IQ4_XS-pure-GGUF) | IQ4_XS (pure, ~13.5 GB) | All engines | Best choice for upstream llama.cpp / BeeLlama |
+| [jpetrina/Qwen3.8-27B-MTP-IQ4_XS-pure-GGUF](https://huggingface.co/jpetrina/Qwen3.8-27B-MTP-IQ4_XS-pure-GGUF) | IQ4_XS (MTP) | All engines (MTP-capable) | MTP spec decoding variant — fits ≤48K on 16 GB |
+| [jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller](https://huggingface.co/jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller) | IQ4_XS (Smaller, 12.6 GB) | All engines | Slimmest option — more KV headroom |
+
+The sharp chat template (used by the MTP preset via
+`--chat-template-file configs/qwen3.8_sharp_chat_template.jinja`) comes from
+[peculiar-ragdoll/Qwen-Sharp-Chat-Templates](https://huggingface.co/peculiar-ragdoll/Qwen-Sharp-Chat-Templates).
+
 ---
 
 ## 3. Installation and Configuration
