@@ -89,6 +89,49 @@ def _dsh_upsert_local_llama(content: str, host: str, port: str) -> tuple[str, bo
     )
     return content.replace(marker, marker + block, 1), True
 
+
+# Flags that take a file path as their next argument. Presets may store these
+# as project-relative paths (e.g. "configs/qwen3.8_sharp_chat_template.jinja");
+# the launcher resolves them against SCRIPT_DIR so no machine-specific absolute
+# path ever ships in a preset.
+_PATH_ARG_FLAGS = {
+    "--chat-template-file",
+    "--mmproj",
+    "--lookup-cache-static",
+    "--lookup-cache-dynamic",
+    "--prompt-cache",
+    "--prompt-cache-file",
+}
+
+
+def resolve_param_paths(params: str) -> str:
+    """Expand project-relative file paths inside a params string.
+
+    Walks the tokens; for each known path-taking flag it resolves the next
+    token against SCRIPT_DIR when that file exists there, making the path
+    absolute so the server works regardless of the process CWD. Absolute
+    values and missing files are left verbatim, and flags like
+    --chat-template-kwargs survive untouched.
+    """
+    if not params:
+        return params
+    tokens = shlex.split(params, posix=True)
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        out.append(tok)
+        if tok in _PATH_ARG_FLAGS and i + 1 < len(tokens):
+            val = tokens[i + 1]
+            p = Path(val)
+            if not p.is_absolute():
+                cand = SCRIPT_DIR / val
+                if cand.exists():
+                    out.append(str(cand))
+                    i += 1
+        i += 1
+    return " ".join(out)
+
 # --- Auto-discover llama-server ---
 def find_llama_server() -> Path | None:
     env_path = os.environ.get("LLAMA_SERVER_PATH")
@@ -1235,6 +1278,7 @@ class LLMLauncher(QMainWindow):
             argv = [binary, "-m", model, "--host", host, "--port", port,
                     "--alias", "Local Model"]
             if params:
+                params = resolve_param_paths(params)
                 argv += shlex.split(params, posix=True)
             self._log(f"Launching: {' '.join(argv)}")
             self.process = subprocess.Popen(
@@ -1407,7 +1451,7 @@ class LLMLauncher(QMainWindow):
         port = self.port_entry.text().strip() or PORT
         if model:
             name = Path(model).name
-            cmd = f'"{binary}" -m "{name}" --host {host} --port {port} {params}'
+            cmd = f'"{binary}" -m "{name}" --host {host} --port {port} {resolve_param_paths(params)}'
             self.preview_label.setText(cmd)
         else:
             self.preview_label.setText("(select a model)")

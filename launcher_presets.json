@@ -20,7 +20,7 @@
     "port": "8080"
   },
   "Qwen3.8-27B (Bee KVarN MTP)": {
-    "params": "-c 100000 -np 1 -ngl 99 -b 1024 -ub 256 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 -tb 6 --flash-attn on --spec-type draft-mtp --spec-draft-n-max 2 --reasoning auto --jinja --chat-template-file \"D:/Arx/Software Downloads/Hermes copy/llm-inference-server/configs/qwen3.8_sharp_chat_template.jinja\" --chat-template-kwargs \"{\\\"preserve_thinking\\\": true, \\\"reasoning_effort\\\":\\\"medium\\\"}\" --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
+    "params": "-c 100000 -np 1 -ngl 99 -b 1024 -ub 256 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 -tb 6 --flash-attn on --spec-type draft-mtp --spec-draft-n-max 2 --reasoning auto --jinja --chat-template-file configs/qwen3.8_sharp_chat_template.jinja --chat-template-kwargs \"{\\\"preserve_thinking\\\": true, \\\"reasoning_effort\\\":\\\"medium\\\"}\" --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
     "port": "8080"
   },
