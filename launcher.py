@@ -1368,12 +1368,40 @@ class LLMLauncher(QMainWindow):
         threading.Thread(target=self._read_output, daemon=True).start()
 
     def _stop_server(self):
-        if self.process:
+        """Kill ONLY the process this launcher started (by PID tree).
+
+        Deliberately does NOT blanket-kill `llama-server.exe` by image name:
+        the user may run several servers at once (e.g. port 8080 + 8888 from
+        separate launchers), and killing by name would take down servers this
+        instance does not own.
+
+        taskkill is retried because on a busy model it can transiently fail
+        with access-denied / "process not found"; we also poll the Popen
+        handle to confirm the process actually exited before declaring stop.
+        """
+        proc = self.process
+        if proc and proc.pid:
+            for _ in range(5):
+                try:
+                    r = subprocess.run(
+                        f"taskkill /F /T /PID {proc.pid}",
+                        shell=True, capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    break  # taskkill itself failed (timeout etc.) — stop here
+                # Success, or the PID is already gone → nothing left to kill.
+                err = r.stderr.lower()
+                if r.returncode == 0 or b"not found" in err or "\u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d".encode() in err:
+                    break
+                try:
+                    proc.poll()
+                    if proc.returncode is not None:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
             try:
-                subprocess.run(
-                    f"taskkill /F /T /PID {self.process.pid}",
-                    shell=True, capture_output=True, timeout=5
-                )
+                proc.poll()
             except Exception:
                 pass
         self.process = None
@@ -1384,6 +1412,17 @@ class LLMLauncher(QMainWindow):
         if self.log_file:
             self.log_file.close()
             self.log_file = None
+
+    def closeEvent(self, event):
+        """Kill the llama-server process tree when the window closes.
+
+        Without this override PyQt6 only exits the GUI process on window
+        close; the subprocess.Popen child (llama-server.exe) would keep
+        running, holding VRAM/RAM and auto-reloading the model on later
+        requests. _stop_server() taskkill /F /T the whole tree.
+        """
+        self._stop_server()
+        event.accept()
 
     def _toggle_log_save(self, state):
         if self.log_save_cb.isChecked():

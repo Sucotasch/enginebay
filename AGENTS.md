@@ -18,6 +18,7 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 | `configs/inference.env` | Server parameters |
 | `scripts/start_llama_cpp.sh` | Alternative launcher (Git Bash) |
 | `scripts/smoke_test.py` | Verify server is responding |
+| `scripts/update_opencode_models.py` | Refresh OpenCode Free models in `~/.dsh/settings.yaml` (see skill `dsh-providers`) |
 
 ## Critical constraints
 
