@@ -50,6 +50,23 @@ source .venv/Scripts/activate
 python scripts/smoke_test.py
 ```
 
+## Git push from this workspace (working method)
+
+Plain `git push` fails in this sandbox: `credential.helper=manager` tries to
+open a GUI prompt and `sh.exe` can't create its signal pipe. The working
+method uses the already-authenticated GitHub CLI token via an embedded URL
+(push only; remote is restored to the clean URL afterwards):
+
+```powershell
+$token = gh auth token          # gh is logged in as Sucotasch
+$orig  = git remote get-url origin
+git remote set-url origin "https://x-access-token:$token@github.com/Sucotasch/enginebay.git"
+git push origin main
+git remote set-url origin "$orig"   # always restore!
+```
+
+(Tested 2026-09-01: pushed `main`, worked. Don't commit the embedded-token URL.)
+
 ## Alternative engines
 
 The launcher supports multiple llama-server engines. Each engine has its own GitHub release source, version download dir, and asset parser:
