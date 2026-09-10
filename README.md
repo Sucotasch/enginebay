@@ -10,15 +10,40 @@ and DeepSeek Harness GUI.
 (16 GB VRAM)**. Achieved: **35.9 t/s** at 96K context (pure mode, ik_llama.cpp),
 **~30x on repeated agent requests** (prompt cache in RAM, verified 26.5s warmup → 0.86s repeats).
 
+**MoE fleet (2026-09 campaign, measured):** Qwen3.6-35B-A3B Q6_K (26.6 GB) and
+Gemma-4-26B-A4B (23.5 GB) run on the same 16 GB card via expert offload
+(`--n-cpu-moe`) — **29.6 t/s** and **47.5 t/s** decode respectively. Presets
+"(Bee MoE)" ship in `launcher_presets.json`. Full research:
+[scripts/_research_moe/RESEARCH.md](scripts/_research_moe/RESEARCH.md).
+
 ## Features
 
 - **PyQt6 GUI launcher** — model selection, presets, llama.cpp version management
 - **Auto-discovery** — finds Hermes config and llama-server binary automatically
-- **Version manager** — download, install, and switch between llama.cpp releases from GitHub
+- **Version manager** — download, install, and switch between llama.cpp releases from GitHub (streamed download with live MB progress, stall-timeout, retries, and an optional configurable proxy via `launcher_config.json` `"proxy"` key)
 - **Multi-engine support** — select between upstream llama.cpp, BeeLlama.cpp (fork), and ik_llama.cpp (fork, source-built) with per-engine version management, download, and activation
+- **Model Library** — recursive GGUF discovery under a user-chosen root with a persistent header cache: search, per-row fit dots (🟢🟡🔴 against measured VRAM records / calibrated estimates), `[MoE offload]` ⚫ markers for MoE files (they run with expert offload — a red dot would be a lie), `[projector]`/`[draft]` tags
+- **MoE expert offload presets** — measured `--n-cpu-moe` configs for Qwen3.6-35B-A3B and Gemma-4-26B-A4B (see the VRAM-edge law below)
 - **Engine-safe presets** — presets carry params/host/port only (never model paths); incompatible flags are auto-detected when switching engines or loading presets, with a warning dialog instead of a crash
 - **Health monitor** — real-time server status in the GUI
 - **Hermes + DeepSeek Harness sync** — auto-registers the running server as a local provider in both `~/.hermes/config.yaml` and `~/.dsh/settings.yaml`, keeping the port in sync when you change it in the GUI
+
+### The VRAM-edge law (MoE offload, measured)
+
+Fewer CPU experts is **not** faster: once the GPU-resident share exceeds VRAM, the
+driver silently spills to WDDM shared memory and decode craters (33 → 6 t/s). The
+optimum is the largest GPU share that still fits with **~600+ MB headroom**; the
+spill cliff is one expert layer wide. On this box (RTX 4070 Ti SUPER, beellama
+v0.4.5, 96K ctx, q4_0 KV):
+
+| Model | File | Preset | Decode | Prefill | VRAM free |
+|---|---|---|---|---|---|
+| Qwen3.6-35B-A3B Q6_K | 26.6 GB | `--n-cpu-moe 21` (of 40) | **29.6 t/s** | 420 t/s | 650 MB |
+| Gemma-4-26B-A4B Q4_K_M | 23.5 GB | `--n-cpu-moe 6` (of 30) | **47.5 t/s** | 1530 t/s | 660 MB |
+
+Measured negatives (do not retry blindly): MTP draft on A3B, KVarN on MoE archs,
+`-ub > 512` at the edge, `-t 6`, blade-edge configs (no headroom — a dwm/browser
+spike flips them into spill). Full data: [scripts/_research_moe/RESEARCH.md](scripts/_research_moe/RESEARCH.md).
 
 > Engineering notes, measured VRAM budgets, engine flag differences, and build
 > gotchas live in **[dev_guide.md](dev_guide.md)**.
@@ -139,6 +164,8 @@ reads the IQ4_KT/KS trellis quants used in the MTP variant:
 | [jpetrina/Qwen3.8-27B-IQ4_XS-pure-GGUF](https://huggingface.co/jpetrina/Qwen3.8-27B-IQ4_XS-pure-GGUF) | IQ4_XS (pure, ~13.5 GB) | All engines | Best choice for upstream llama.cpp / BeeLlama |
 | [jpetrina/Qwen3.8-27B-MTP-IQ4_XS-pure-GGUF](https://huggingface.co/jpetrina/Qwen3.8-27B-MTP-IQ4_XS-pure-GGUF) | IQ4_XS (MTP) | All engines (MTP-capable) | MTP spec decoding variant — fits ≤48K on 16 GB |
 | [jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller](https://huggingface.co/jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller) | IQ4_XS (Smaller, 12.6 GB) | All engines | Slimmest option — more KV headroom |
+| Qwen3.6-35B-A3B (Q6_K, 26.6 GB) | MoE 35B-A3B | beellama.cpp | Expert offload `--n-cpu-moe 21` → 29.6 t/s @ 96K on 16 GB (preset "Qwen3.6-35B-A3B (Bee MoE)") |
+| Gemma-4-26B-A4B (Q4_K_M/Q6_K_L) | MoE 26B-A4B | beellama.cpp | Expert offload `--n-cpu-moe 6` → 47.5 t/s @ 96K on 16 GB (preset "Gemma-4-26B-A4B (Bee MoE)") — fastest model in the fleet |
 
 The sharp chat template (used by the MTP preset via
 `--chat-template-file configs/qwen3.8_sharp_chat_template.jinja`) comes from
@@ -165,12 +192,16 @@ The sharp chat template (used by the MTP preset via
 
 ### First Launch (quick start)
 
-1. **Unzip** the release archive anywhere (or clone the repo).
+1. **Unzip** the release archive anywhere (or clone the repo). The release has
+   two assets: the main archive (code, presets, scripts) and an optional
+   `ik_llama-*.zip` — only for IQ4_KT/KS trellis-quant users; unzip it into
+   `ik_llama.cpp/versions/15dddc6/` if you need it. Everyone else: skip it,
+   upstream/BeeLlama binaries are downloaded from the GUI.
 2. **Install deps:** double-click `setup-deps.bat` (installs `PyQt6`, `openai`, `httpx`).
 3. **Launch the GUI:** double-click `Launcher.vbs` (no terminal window) or run `python launcher.py`.
-4. **Select your model:** pick the GGUF in the *Model* field (e.g. from the HF links above).
+4. **Select your model:** pick the GGUF in the *Model* field (e.g. from the HF links above), or open **Library** and pick from your collection (first open asks for your models root; fit dots show what fits in VRAM, ⚫ marks MoE models runnable via expert offload).
 5. **Pick the engine:** set the *Engine* dropdown to `ik_llama.cpp` (for IQ4_KT/KS) or `llama.cpp` / `BeeLlama.cpp` — use **Check Updates → Use** to activate a binary.
-6. **Load a preset:** choose `Qwen3.8-27B (ik_llama pure)` from the presets list (96K, q4_0 KV, `--reasoning auto`).
+6. **Load a preset:** choose `Qwen3.8-27B (ik_llama pure)` from the presets list (96K, q4_0 KV, `--reasoning auto`), or a `(Bee MoE)` preset for Qwen3.6-35B-A3B / Gemma-4-26B-A4B (expert offload, see the VRAM-edge law above).
 7. **Start:** click **Start Server** and wait for the model to load into VRAM.
 
 From the console instead: `set MODEL_GGUF=<path>` then `start-llama.bat`

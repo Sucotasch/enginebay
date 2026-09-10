@@ -43,7 +43,9 @@
 | `Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf` | qwen35 | 145 | IQ4_KT/IQ4_KS (144/145) | **только ik_llama.cpp** |
 | `qwen3.8-27b-IQ4_XS-pure.gguf` (13.54 GB) | qwen35 | 30 | IQ4_XS (23) | beellama, llama.cpp, vllm.cpp |
 | `Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller.gguf` (12.61 GB) | qwen35 | — | IQ4_XS | beellama, llama.cpp |
-| Gemma 4 12B/26B (`gemma-4-12B-it-heretic-Q8_0`, `gemma-4-26B-A4B-it-assistant.Q4_K_M`, `...Q6_K_L` и т.д.) | gemma4 | — | Q4_K_M/Q6_K_L/Q8_0 | все движки |
+| Gemma 4 12B/26B dense (`gemma-4-12B-it-heretic-Q8_0` и т.д.) | gemma4 | — | Q8_0 | все движки |
+| Gemma-4-26B-A4B MoE (`...-heretic-Q4_K_M`, `google_...-Q6_K_L`, 23.5-25.7 GB) | gemma4 (MoE 26B-A4B) | — | Q4_K_M/Q6_K_L | все движки; offload на beellama (`--n-cpu-moe 6`) |
+| Qwen3.6-35B-A3B MoE (`Qwen3.6-35B-A3B-Q6_K.gguf`, 26.6 GB) | qwen35moe | — | Q6_K | все движки; offload на beellama (`--n-cpu-moe 21`) |
 | Hearthfire/Magistry/Magnum/Precog 24B (`Q4_K_M`/`Q4_K_L`) | llama | — | Q4_K | все движки |
 | mmproj-*.gguf (0.16-0.86 GB) | vision projector | — | F16/Q8_0 | — |
 
@@ -165,6 +167,8 @@
 
 ## 4. Измеренные скорости (референс)
 
+### 4a. Dense Qwen3.8-27B (ik_llama, 96K pure)
+
 | Конфиг | t/s | Комментарий |
 |---|---|---|
 | Pure 80K | 35.19 | влезает (14654 MiB) |
@@ -178,6 +182,31 @@
 
 Вывод пользователя: **MTP существует ради скорости; если он не ускоряет при
 нужном контексте — компромисс бессмыслен.** → 96K pure это выбор.
+
+### 4b. MoE флот (beellama v0.4.5-cuda-13.3, 96K, q4_0 KV, кампания 2026-09-10)
+
+Полный отчёт с источниками и сырыми логами:
+`scripts/_research_moe/RESEARCH.md` (бенчмарки: `server_96k.jsonl`,
+`upstream_96k.jsonl`, `ikllama_96k.jsonl`, `qwen_results.txt`, `gemma_edge.txt`).
+
+**Закон VRAM-края:** меньше CPU-экспертов ≠ быстрее. Как только GPU-доля
+переваливает VRAM, драйвер молча спилит в WDDM shared memory и tg падает
+(33 → 6 t/s). Оптимум — максимальная GPU-доля с запасом ~600+ MB; обрыв —
+шириной в один слой экспертов.
+
+| Модель | Конфиг | tg t/s | pp t/s | VRAM free |
+|---|---|---|---|---|
+| Qwen3.6-35B-A3B Q6_K (26.6 GB) | `--n-cpu-moe 21/40`, `-b 2048 -ub 512 -t 5 -tb 6` | **29.6** | 420 | 650 MB |
+| Gemma-4-26B-A4B Q4_K_M (23.5 GB) | `--n-cpu-moe 6/30`, та же база | **47.5** | 1530 | 660 MB |
+
+Измеренные анти-результаты (не повторять вслепую): MTP-драфт на A3B (24-27.5 t/s
+во всех вариантах), KVarN на MoE-архитектурах (теряет и VRAM, и скорость),
+`-ub 1024` на краю (10.9 t/s — спилл), `-t 6` (25.2 vs 29.0), blade-edge
+конфиги без запаса (флакают при спайке dwm/браузера), upstream и ik_llama на
+MoE (проигрывают beellama на обеих моделях).
+
+Направление счёта `--n-cpu-moe`: beellama считает от ПЕРВЫХ слоёв,
+upstream — от высших. Кросс-движковый пресет без инверсии N непортируем.
 
 ---
 

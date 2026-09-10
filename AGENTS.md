@@ -13,9 +13,10 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 | `stop-llama.bat` | Kill server |
 | `Launcher.bat` | Open PyQt6 GUI (`launcher.py`) |
 | `launch-hermes-llama.bat` | Start server + Hermes with local provider |
-| `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection**, **VRAM guard + DLL diagnostics** |
-| `launcher_presets.json` | Saved configs: "Qwen3.8-27B" (port 8080), "Agentic AI" (port 8888), "Qwen3.8-27B (Bee KVarN)" |
-| `vram_records.json` | Measured VRAM footprints per model+engine+ctx (auto-written after each model load; feeds the guard) |
+| `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection**, **VRAM guard + DLL diagnostics**, **Model Library** |
+| `launcher_presets.json` | Saved configs: 10 dense (Qwen3.8-27B/Agentic/Gemma4/KVarN/MTP) + "Qwen3.6-35B-A3B (Bee MoE)" + "Gemma-4-26B-A4B (Bee MoE)" (port 8888, `--n-cpu-moe 21/6`) |
+| `vram_records.json` | Measured VRAM footprints per model+engine+ctx (auto-written after each model load; feeds the guard AND Library fit dots). Git-ignored, machine-local |
+| `scripts/_research_moe/RESEARCH.md` | MoE campaign fact base: sources, benchmarks (server_96k.jsonl etc), VRAM-edge law, measured negatives |
 | `configs/inference.env` | Server parameters |
 | `scripts/start_llama_cpp.sh` | Alternative launcher (Git Bash) |
 | `scripts/smoke_test.py` | Verify server is responding |
@@ -70,15 +71,24 @@ Ported from Quartermaster (github.com/Quartermaster-Labs/Quartermaster, MIT — 
 
 **Need value source**: `vram_records.json`, keyed `engine|model-basename|c<ctx>`. Real measurement = PDH system-wide delta between pre-launch baseline and post-"model loaded" snapshot (works on engines that don't print VRAM lines, e.g. beellama v0.4.5). Fallback estimate = GGUF file size + 2 GB buffer, always labelled "estimate". Presets are NEVER modified by the guard.
 
+## Update downloader (fixed 2026-09-10)
+
+`_download_paired` in `launcher.py`: streamed 256 KB-chunk fetch with **live MB progress** (`X / Y MB` via `_set_progress_signal`), 30 s stall-timeout per read, 3 retries with backoff, truncation/size checks, errors surfaced to BOTH the log and the `dl_progress_label`. Root cause of the old "hangs forever on Downloading...": GitHub API 403 rate-limit (60 req/hr unauth per IP — reproduced live) or a stalled asset connection left the old `resp.read()` silent for up to 300 s with zero feedback.
+
+**Optional proxy** (user-mandated design — never forced): `"proxy": "http://host:port"` in `launcher_config.json` → `urllib.request.build_opener(ProxyHandler({...}))` for API + asset fetches; empty/absent = direct. Works for any proxy system (HTTP CONNECT).
+
+**Release layout (v3.0.0+)**: two assets — the main zip (code, presets, scripts; engines download on demand via the GUI) and a separate `ik_llama-*.zip` with the prebuilt `ik_llama.cpp/versions/15dddc6/` (source-built, no upstream binaries exist — most users don't need it). Machine-local files (`launcher_config.json`, `vram_records.json`, `launcher_history.json`, logs) are never packaged.
+
 ## Model Library (launcher "Library" button)
 
-`ModelLibraryDialog` in `launcher.py`: recursive `*.gguf` discovery under a **user-chosen root** (nothing hardcoded — `cfg["model_root"]` in `launcher_config.json`, gitignored; first open asks via native directory dialog, defaults checked: `~/Ai/Models`, `~/models`, `~/.cache/lm-studio/models`). Search-by-substring, per-row fit dot (🟢🟡🔴 from `vram_records.json` / size+2GB vs live PDH free), `[projector]`/`[draft]` tags from filename, arch/size columns.
+`ModelLibraryDialog` in `launcher.py`: recursive `*.gguf` discovery under a **user-chosen root** (nothing hardcoded — `cfg["model_root"]` in `launcher_config.json`, gitignored; first open asks via native directory dialog, defaults checked: `~/Ai/Models`, `~/models`, `~/.cache/lm-studio/models`). Search-by-substring, per-row fit dot, `[projector]`/`[draft]` tags from filename, arch/size columns.
 
-- **Cache contract** (chosen by user over full-scan/lazy variants): `cfg["library"]` = {path: {size, mtime, meta}}. Opening the dialog = cheap stat validation (new files appear as unindexed, vanished files drop). "Rescan" = full rewalk + GGUF header read into cache.
+- **Fit-dot math (fixed 2026-09-10)**: need = measured record (max across engines/ctx, case-insensitive basename match) else size + **calibrated overhead** (`_dense_overhead_mb`: avg of measured footprint−file_size across `vram_records.json`, fallback flat `VRAM_BUF_EST_MB`). Compared against a **ceiling = total−600 MB**, NOT live free: WDDM evicts dwm/chrome when llama.cpp allocates, so live-free dots called 14 GB models red that launch fine (measured: IQ4_KT 15204 MB, Magistry 15237 MB, both fit 16063−600). `library_entry_need_mb` takes the path as an explicit arg — the library cache stores it as the DICT KEY (`entry.get("path")` is empty → records never matched; this bug made every row use the estimate branch).
+- **Cache contract** (chosen by user over full-scan/lazy variants): `cfg["library"]` = {path: {size, mtime, meta}}. Opening the dialog = cheap stat validation (new files appear as unindexed, vanished files drop). "Rescan" = full rewalk + GGUF header read into cache. `_ensure_scan` counts indexed entries **under the current root only** — leftover foreign-dir entries (e.g. from an e2e test) must never suppress the first scan.
 - **GGUF header reader** `diag.gguf_metadata(path)`: bounded stream (≤8 MB read, early exit once arch+name+ctx known — tokenizer arrays at header tail skipped; ~1 ms warm vs 2.3 s naive full parse on HDD). Returns arch/name/size_label/ctx/blocks/quant/file_type. `general.file_type` is often ABSENT (ik-quant builds) — quant falls back to filename.
 - **MoE models (Qwen3.6-35B-A3B, Gemma-4-26B-A4B)**: detected via `size_label` regex `NNB-AxB` (total-active params) or `expert_count` KV — no tensor parsing. In the list: ⚫ dot + `[MoE offload]` tag instead of a false 🔴 (a 26.6 GB MoE file does NOT mean "doesn't fit" — it runs with `--n-cpu-moe`/`-ot exps=CPU` keeping only attention+KV+shared on GPU). At launch (`_vram_guard`), a MoE model without an offload flag in params gets a loud log+statusbar warning (never blocks): experts would spill to shared memory (WDDM) and crawl.
 - **Draft tagging rule**: a companion draft is a separate `mtp-*` file (e.g. `mtp-Qwen_Qwen3.6-35B-A3B-Q8_0.gguf`); a main model merely NAMED `*-MTP` (Qwen3.8-27B MTP-tuned, 14 GB) is NOT a draft — never tag by suffix.
-- Tests: `scripts/test_gguf_meta.py` (parser), `test_gguf_moe.py` (MoE detect on real zoo files), `test_library_e2e.py` (dialog: scan→cache→tags→dots→filter→pick; offscreen Qt).
+- **Tests must not touch `launcher_config.json`**: the dialog persists via `save_config(self.cfg)` — `test_library_e2e.py` monkey-patches `launcher.CONFIG_FILE` to a scratch file (an earlier version leaked `_libtest_tmp` entries into the real config and suppressed the user's first scan). Tests: `test_gguf_meta.py`, `test_gguf_moe.py`, `test_library_e2e.py` (isolated), `test_lib_fit_dots.py` (dots vs records), `test_launcher_smoke.py` (offscreen: 0 red rows, MoE markers, download-path asserts).
 
 ## Job Object — children die with the parent (PORTABLE RECIPE)
 
