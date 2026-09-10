@@ -2024,6 +2024,13 @@ def main():
     except Exception:
         pass
 
+    # Kill-on-close Job Object FIRST: any child (llama-server) spawned from
+    # now on inherits the job, so this process dying by ANY means (graceful
+    # close, crash, kill) reaps the whole tree via the OS. The belt to
+    # closeEvent/_stop_server's suspenders — no more orphaned VRAM holders.
+    if diag is not None and diag.setup_job_tree():
+        print("job tree: active (children die with this process)", file=sys.stderr)
+
     app = QApplication(sys.argv)
     app.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough

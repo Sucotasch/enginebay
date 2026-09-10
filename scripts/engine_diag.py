@@ -551,6 +551,96 @@ def _pid_name(pid: int) -> str:
         return f"pid {pid}"
 
 
+# ── Job Object: kill the whole child tree when THIS process dies ──────────
+#
+# Port of Quartermaster's internal/process/treecleanup_windows.go (MIT).
+# The parent assigns ITSELF to a Job Object with KILL_ON_JOB_CLOSE and leaks
+# the handle for its lifetime; every spawned child inherits the job, so when
+# the parent exits — graceful close, crash, kill -9, logoff — the OS reaps the
+# entire tree. Orphaned llama-server.exe processes holding GBs of VRAM become
+# physically impossible, no matter how the parent died.
+#
+# BREAKAWAY_OK keeps self-update/relaunch legal: a child may escape the job by
+# spawning itself with CREATE_BREAKAWAY_FROM_JOB (used by updaters; EngineBay
+# does not spawn successors today, but the flag costs nothing).
+#
+# Windows 8+ supports nested jobs, so being inside an existing job (task
+# scheduler, CI runners) is fine; on failure we return False and callers keep
+# their manual-kill fallbacks — the job is a safety net, never a requirement.
+
+JobObjectExtendedLimitInformation = 9
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x1000
+
+
+def setup_job_tree() -> bool:
+    """Put this process (and all future children) in a kill-on-close job.
+
+    Returns True when the job is active. The job handle is deliberately NOT
+    closed: KILL_ON_JOB_CLOSE fires when the LAST handle is released, which
+    the OS does at process exit — that is the whole mechanism.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        # Explicit signatures: default c_int restype/args TRUNCATE 64-bit
+        # handles (GetCurrentProcess' pseudo-handle is 0xFFFF...FFFF and
+        # arrives as 0x00000000FFFFFFFF → ERROR_INVALID_HANDLE on x64).
+        k32.CreateJobObjectW.restype = ctypes.c_void_p
+        k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        k32.SetInformationJobObject.restype = ctypes.c_int
+        k32.SetInformationJobObject.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
+        k32.AssignProcessToJobObject.restype = ctypes.c_int
+        k32.AssignProcessToJobObject.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p]
+
+        class _IO_COUNTERS(ctypes.Structure):
+            _fields_ = [("ReadOperationCount", ctypes.c_ulonglong),
+                        ("WriteOperationCount", ctypes.c_ulonglong),
+                        ("OtherOperationCount", ctypes.c_ulonglong),
+                        ("ReadTransferCount", ctypes.c_ulonglong),
+                        ("WriteTransferCount", ctypes.c_ulonglong),
+                        ("OtherTransferCount", ctypes.c_ulonglong)]
+
+        class _JOBOCKET_BASIC_LIMIT(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_ulonglong),
+                        ("PerJobUserTimeLimit", ctypes.c_ulonglong),
+                        ("LimitFlags", ctypes.c_uint),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", ctypes.c_uint),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", ctypes.c_uint),
+                        ("SchedulingClass", ctypes.c_uint)]
+
+        class _JOBOCKET_EXTENDED_LIMIT(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", _JOBOCKET_BASIC_LIMIT),
+                        ("IoInfo", _IO_COUNTERS),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return False
+        info = _JOBOCKET_EXTENDED_LIMIT()
+        info.BasicLimitInformation.LimitFlags = (
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK)
+        cur = k32.GetCurrentProcess()  # pseudo-handle, stays c_void_p-wide
+        if not k32.AssignProcessToJobObject(job, cur):
+            return False
+        if not k32.SetInformationJobObject(
+                job, JobObjectExtendedLimitInformation,
+                ctypes.byref(info), ctypes.sizeof(info)):
+            return False
+        return True  # handle intentionally leaked — see docstring
+    except Exception:
+        return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)

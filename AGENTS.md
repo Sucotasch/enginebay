@@ -49,6 +49,23 @@ Ported from Quartermaster (github.com/Quartermaster-Labs/Quartermaster, MIT — 
 
 **Need value source**: `vram_records.json`, keyed `engine|model-basename|c<ctx>`. Real measurement = PDH system-wide delta between pre-launch baseline and post-"model loaded" snapshot (works on engines that don't print VRAM lines, e.g. beellama v0.4.5). Fallback estimate = GGUF file size + 2 GB buffer, always labelled "estimate". Presets are NEVER modified by the guard.
 
+## Job Object — children die with the parent (PORTABLE RECIPE)
+
+`engine_diag.setup_job_tree()` (called once in `launcher.py:main()` before QApplication): the process assigns ITSELF to a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | BREAKAWAY_OK` and leaks the handle. Every spawned child inherits the job → when the parent dies BY ANY MEANS (graceful close, crash, kill -9, TerminateProcess), the OS reaps the whole tree. Orphaned llama-server.exe holding VRAM becomes physically impossible.
+
+- **ctypes gotcha (the reason a naive port fails)**: kernel32 function pointers default to `restype=c_int` and TRUNCATE 64-bit handles — `GetCurrentProcess()`'s pseudo-handle arrives as `0x00000000FFFFFFFF` → `ERROR_INVALID_HANDLE (6)`. You MUST set `restype = c_void_p` on `CreateJobObjectW` and `argtypes = [c_void_p, c_void_p]` on `AssignProcessToJobObject` (assign BEFORE SetInformationJobObject — order matters when the target is self).
+- Nested jobs are fine on Win8+ (task scheduler / CI parents).
+- `BREAKAWAY_OK` keeps self-update relaunch legal (`CREATE_BREAKAWAY_FROM_JOB`), costs nothing.
+- On failure return False and keep manual taskkill fallbacks — the job is a safety net, never a requirement.
+- Verified live (`scripts/test_job_tree.py`): parent hard-kills itself with TerminateProcess → child dies with it, zero orphans.
+- **Reusable in other projects** (e.g. qwengate-deepseek when it spawns long-lived children): copy `setup_job_tree()` from `scripts/engine_diag.py` — it is dependency-free (ctypes only).
+
+## Lessons from Quartermaster (for future work)
+
+- **Admission vs shed ceilings must differ**: admission (can I load?) charges a reserve; a shed/watchdog ceiling (should I evict a RUNNING model?) must NOT — otherwise a model sized within the reserve of the budget unload/reload-loops forever (they hit this exact bug). Relevant the day EngineBay runs two servers (8080+8888) against one GPU.
+- **Quant token parsing belongs in ONE place**: model-name → (base, quant) parsing, written as stable quant FAMILIES (IQ*, K*, TQ, MXFP4, NVFP4…) rather than an enumeration, or every new ggml type breaks four consumers at once (their `quant.go` story). Relevant when the model fleet grows beyond Qwen/Gemma.
+- **GGUF parser + auto load-planner** (`autogen/gguf.go` + `generate_sizing.go`, ~1.5k lines Go): reads arch/blocks/quant-from-tensors from the GGUF header and computes -ngl/-c/--n-cpu-moe per architecture (dense vs MoE vs recurrent, KV per-token per-arch, MTP-draft overhead). DELIBERATELY DEFERRED, not rejected: the measured-record approach (PDH before/after) is more accurate for already-launched presets, but the parser still covers (a) FIRST launch of a brand-new model with no record, (b) real quant read from tensor types, not filename, (c) cross-arch context tiering when new models arrive. Implement when adding vLLM/Gemma models or when preset hand-tuning hurts.
+
 ## How to run
 
 ```bash
