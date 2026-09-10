@@ -77,7 +77,7 @@ Ported from Quartermaster (github.com/Quartermaster-Labs/Quartermaster, MIT — 
 
 **Optional proxy** (user-mandated design — never forced): `"proxy": "http://host:port"` in `launcher_config.json` → `urllib.request.build_opener(ProxyHandler({...}))` for API + asset fetches; empty/absent = direct. Works for any proxy system (HTTP CONNECT).
 
-**Release layout (v3.0.0+)**: two assets — the main zip (code, presets, scripts; engines download on demand via the GUI) and a separate `ik_llama-*.zip` with the prebuilt `ik_llama.cpp/versions/15dddc6/` (source-built, no upstream binaries exist — most users don't need it). Machine-local files (`launcher_config.json`, `vram_records.json`, `launcher_history.json`, logs) are never packaged.
+**Release layout (v3.0.0+)**: the main zip (code, presets, scripts; engines download on demand via the GUI) is repackaged every release via `scripts/package_release.py`. The ik_llama binaries live as a **one-time asset** (`ik_llama-v3.0.0-win64.zip`, 608 MB) — subsequent releases do NOT re-upload it; README links directly to the permanent asset URL (`releases/download/v3.0.0/ik_llama-v3.0.0-win64.zip`). Rebuild + re-upload happens only when ik_llama itself moves to a new commit or a different CUDA arch: then package with `--ik`, upload as a new asset, and update the README link. Machine-local files (`launcher_config.json`, `vram_records.json`, `launcher_history.json`, logs) are never packaged.
 
 ## Model Library (launcher "Library" button)
 

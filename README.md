@@ -192,11 +192,14 @@ The sharp chat template (used by the MTP preset via
 
 ### First Launch (quick start)
 
-1. **Unzip** the release archive anywhere (or clone the repo). The release has
-   two assets: the main archive (code, presets, scripts) and an optional
-   `ik_llama-*.zip` — only for IQ4_KT/KS trellis-quant users; unzip it into
-   `ik_llama.cpp/versions/15dddc6/` if you need it. Everyone else: skip it,
-   upstream/BeeLlama binaries are downloaded from the GUI.
+1. **Unzip** the release archive anywhere (or clone the repo). The main archive
+   is code, presets, and scripts; upstream/BeeLlama engine binaries download on
+   demand from the GUI. IQ4_KT/KS trellis-quant users additionally need the
+   source-built ik_llama engine — download it **once** from
+   [ik_llama-v3.0.0-win64.zip](https://github.com/Sucotasch/enginebay/releases/download/v3.0.0/ik_llama-v3.0.0-win64.zip)
+   (608 MB) and unzip into `ik_llama.cpp/versions/`. The binary is stable and
+   carried across EngineBay releases (not repackaged every time); a new asset
+   appears only when ik_llama itself is rebuilt.
 2. **Install deps:** double-click `setup-deps.bat` (installs `PyQt6`, `openai`, `httpx`).
 3. **Launch the GUI:** double-click `Launcher.vbs` (no terminal window) or run `python launcher.py`.
 4. **Select your model:** pick the GGUF in the *Model* field (e.g. from the HF links above), or open **Library** and pick from your collection (first open asks for your models root; fit dots show what fits in VRAM, ⚫ marks MoE models runnable via expert offload).

@@ -1,17 +1,14 @@
-"""Package EngineBay release: two deterministic zips.
+"""Package EngineBay release: deterministic zips.
 
-1. enginebay-v<VER>-win64.zip — git-tracked files only (code, presets,
-   scripts, docs). Engines (upstream/BeeLlama) download on demand via the
-   GUI Version Manager.
-2. ik_llama-v<VER>-win64.zip — OPTIONAL asset: the source-built
-   ik_llama.cpp/versions/15dddc6/ binaries (llama-server.exe + ggml/llama/
-   mtmd DLLs + CUDA runtime). ik_llama has no upstream Windows binaries;
-   only IQ4_KT/KS trellis-quant users need it. Unzip into
-   ik_llama.cpp/versions/ at the same level as the main archive.
+Default — the main zip only: git-tracked files (code, presets, scripts,
+docs). Engines (upstream/BeeLlama) download on demand via the GUI.
 
-Usage: python scripts/package_release.py [--ver 3.0.0]
-Reads the current git tag state; refuses to package a dirty tree unless
---allow-dirty.
+--ik — additionally package the OPTIONAL ik_llama asset (source-built
+ik_llama.cpp/versions/15dddc6/ binaries). Policy (AGENTS.md): re-upload
+ONLY when ik_llama moves to a new commit or a different CUDA arch;
+otherwise releases just link the existing asset URL from README.
+
+Usage: python scripts/package_release.py [--ver 3.0.0] [--ik] [--allow-dirty]
 """
 import argparse
 import subprocess
@@ -33,6 +30,9 @@ def git(args: list[str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ver", default=None, help="release version (default: git describe)")
+    ap.add_argument("--ik", action="store_true",
+                   help="also package the optional ik_llama binaries asset "
+                        "(only when ik_llama is rebuilt — see AGENTS.md release policy)")
     ap.add_argument("--allow-dirty", action="store_true")
     args = ap.parse_args()
 
@@ -54,7 +54,12 @@ def main() -> int:
             z.write(REPO / f, f"enginebay/{f}")
     print(f"main: {main_zip.name}  ({main_zip.stat().st_size / 1e6:.1f} MB, {len(files)} files)")
 
-    # ── asset 2: optional ik_llama binaries ──
+    if not args.ik:
+        print("\nDefault: ik_llama asset NOT repackaged (one-time asset policy).")
+        print("If ik_llama was rebuilt on a new commit/arch, re-run with --ik.")
+        return 0
+
+    # ── optional asset: ik_llama binaries (rebuild-only) ──
     ik_dir = REPO / "ik_llama.cpp" / "versions" / "15dddc6"
     if not ik_dir.is_dir():
         print(f"SKIP: {ik_dir} not found (ik_llama not built)")
@@ -66,8 +71,8 @@ def main() -> int:
                 z.write(f, f"ik_llama.cpp/versions/15dddc6/{f.relative_to(ik_dir)}")
     print(f"ik_llama: {ik_zip.name}  ({ik_zip.stat().st_size / 1e6:.1f} MB)")
 
-    print("\nUpload both as release assets (ik_llama is OPTIONAL for users):")
-    print(f"  gh release create v{ver} {main_zip.name} {ik_zip.name} ...")
+    print(f"\nUpload the main zip (plus the ik zip) as release assets; update the")
+    print(f"README ik_llama download link to the new asset URL.")
     return 0
 
 
