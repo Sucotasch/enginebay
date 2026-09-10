@@ -524,22 +524,59 @@ def fit_class(need_mb: int, free_mb: int | None) -> str:
     return "red"
 
 
-def library_entry_need_mb(entry: dict, records: dict) -> int:
+def library_entry_need_mb(entry: dict, records: dict, lib: dict | None = None,
+                          path: str | None = None) -> int:
     """Best-known VRAM need for a library entry: measured record for the
     matching basename (max across engines/ctx — an overview figure), else
-    file size + slack. The launch-time guard still uses the exact
-    engine|model|ctx key; this is only for the list's fit dots."""
-    base = os.path.basename(entry.get("path", ""))
+    file size + CALIBRATED overhead. The old flat +2 GB buffer painted every
+    13-14 GB dense model red on a 16 GB card even though they launch fine;
+    the overhead is now derived from our own measured records
+    (footprint − file size), falling back to VRAM_BUF_EST_MB when no
+    calibration exists. The launch-time guard still uses the exact
+    engine|model|ctx key; this is only for the list's fit dots.
+    NOTE: `path` must be passed explicitly (the cache stores it as the
+    DICT KEY, not as an entry field — entry.get('path') is empty)."""
+    base = os.path.basename(path or entry.get("path", ""))
     best = 0
     for key, rec in records.items():
         parts = key.split("|")
-        if len(parts) == 3 and parts[1] == base:
+        if len(parts) == 3 and parts[1].lower() == base.lower():
             mb = rec.get("mb", 0) if isinstance(rec, dict) else 0
             if mb > best:
                 best = mb
     if best:
         return best
-    return entry.get("size", 0) // (1024 * 1024) + VRAM_BUF_EST_MB
+    size_mb = entry.get("size", 0) // (1024 * 1024)
+    return size_mb + _dense_overhead_mb(records, lib)
+
+
+def _dense_overhead_mb(records: dict, lib: dict | None = None) -> int:
+    """KV+compute overhead, calibrated from measured records:
+    overhead = recorded footprint − file size, averaged over records whose
+    file size is known (from the library cache, matched by basename).
+    Measured example on this box: 15420 MB footprint − 13824 MB file =
+    1596 MB for 96K ctx q4_0 KV (24-27B class). No records → flat buffer."""
+    if not records:
+        return VRAM_BUF_EST_MB
+    sizes: dict[str, int] = {}
+    if lib:
+        for p, v in lib.items():
+            if isinstance(v, dict):
+                sizes[os.path.basename(p).lower()] = v.get("size", 0) // (1024 * 1024)
+    overs = []
+    for key, rec in records.items():
+        parts = key.split("|")
+        if len(parts) != 3 or not isinstance(rec, dict):
+            continue
+        fmb = sizes.get(parts[1].lower())
+        if not fmb:
+            continue
+        mb = rec.get("mb", 0)
+        if mb > fmb:
+            overs.append(mb - fmb)
+    if not overs:
+        return VRAM_BUF_EST_MB
+    return int(sum(overs) / len(overs))
 
 
 # --- Dark theme stylesheet ---
@@ -805,13 +842,21 @@ class ModelLibraryDialog(QDialog):
         snap = self._current_snapshot()
         free_mb = snap.get("free_mb") if snap else None
         total_mb = snap.get("total_mb") if snap else None
+        # "Ceiling" = total − fixed floor (GPU kernel/driver reservation).
+        # Live free includes dwm/chrome, which WDDM evicts to shared memory
+        # when llama.cpp allocates — measuring dots against live free marked
+        # models red that launch fine in practice. The floor (600 MB) is the
+        # non-evictable part (driver surfaces, OS). Measured floor evidence:
+        # IQ4_XS footprint 15420 MB on 16063 MB total ran without spill.
+        ceiling_mb = (total_mb - 600) if total_mb else free_mb
         needle = self.search_ed.text().strip().lower()
         self.list_w.clear()
         for e in self._entries:
             base = os.path.basename(e["path"])
             if needle and needle not in base.lower():
                 continue
-            need = library_entry_need_mb(e, self.records)
+            need = library_entry_need_mb(e, self.records, load_library_cache(self.cfg),
+                                         path=e.get("path"))
             tags = library_tags(base)
             tag_s = " ".join(f"[{t}]" for t in tags)
             meta = e.get("meta") or {}
@@ -822,7 +867,7 @@ class ModelLibraryDialog(QDialog):
                 dot = "\u26AB"
                 bits = [dot, tag_s, "[MoE offload]"] if tag_s else [dot, "[MoE offload]"]
             else:
-                dot = _FIT_DOT[fit_class(need, free_mb)]
+                dot = _FIT_DOT[fit_class(need, ceiling_mb)]
                 bits = [dot, tag_s] if tag_s else [dot]
             if meta.get("arch"):
                 bits.append(str(meta.get("arch")))
@@ -878,8 +923,16 @@ class ModelLibraryDialog(QDialog):
         self._refill()
 
     def _ensure_scan(self):
-        """First open: if cache empty, do the full scan now (with headers)."""
-        if not load_library_cache(self.cfg) and self.root:
+        """First open: if the cache has NO indexed entries under the current
+        root, do the full scan now. A cache with only foreign/leftover
+        entries (e.g. from e2e tests under another tree) must not suppress
+        the initial header scan for the user's real library."""
+        if not self.root:
+            return
+        lib = load_library_cache(self.cfg)
+        indexed = sum(1 for path, v in lib.items()
+                      if v.get("meta") and str(path).startswith(self.root))
+        if indexed == 0:
             self._rescan()
 
     @property
@@ -1610,18 +1663,60 @@ class LLMLauncher(QMainWindow):
         self.dl_progress_label.setText("downloading 1/2...")
         QApplication.processEvents()
 
+        # Optional proxy — ONLY if the user configured one (cfg key "proxy").
+        # Supports http://host:port and socks5 via urllib if PySocks is present.
+        proxy = (self.cfg.get("proxy") or "").strip()
+        opener = None
+        if proxy:
+            handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+            opener = urllib.request.build_opener(handler)
+            self._log(f"Using configured proxy: {proxy}")
+
+        def fetch(url: str, label: str, expect_mb: float) -> bytes:
+            """Streamed download with live progress, retries, and honest
+            timeouts: 15 s to connect, 30 s max stall between reads.
+            Errors are RAISED to the caller — never a silent hang."""
+            last_err = None
+            for attempt in (1, 2, 3):
+                try:
+                    if attempt > 1:
+                        self._set_progress_signal.emit(f"retry {attempt}/3: {label}...")
+                        time.sleep(2 * attempt)
+                    req = urllib.request.Request(url, headers={"User-Agent": "LLM-Launcher"})
+                    open_fn = opener.open if opener else urllib.request.urlopen
+                    with open_fn(req, timeout=30) as resp:
+                        total = int(resp.headers.get("Content-Length") or 0)
+                        chunks = []
+                        got = 0
+                        stall = 0
+                        while True:
+                            buf = resp.read(256 * 1024)
+                            if not buf:
+                                break
+                            chunks.append(buf)
+                            got += len(buf)
+                            stall = 0
+                            if total:
+                                self._set_progress_signal.emit(
+                                    f"{label}: {got // (1024 * 1024)} / {total // (1024 * 1024)} MB")
+                            else:
+                                self._set_progress_signal.emit(f"{label}: {got // (1024 * 1024)} MB")
+                        if total and got != total:
+                            raise IOError(f"truncated: {got} of {total} bytes")
+                        if got < 1024:
+                            raise IOError(f"suspiciously small ({got} bytes) — likely an error page")
+                        return b"".join(chunks)
+                except Exception as e:
+                    last_err = e
+            raise IOError(f"{label}: {last_err}")
+
         def worker():
             try:
-                req = urllib.request.Request(cudart_url, headers={"User-Agent": "LLM-Launcher"})
-                with urllib.request.urlopen(req, timeout=300) as resp:
-                    cudart_data = resp.read()
-
+                cudart_data = fetch(cudart_url, "downloading 1/2 (cudart)", 0)
                 llama_data = None
                 if llama_url:
                     self._set_progress_signal.emit("downloading 2/2...")
-                    req2 = urllib.request.Request(llama_url, headers={"User-Agent": "LLM-Launcher"})
-                    with urllib.request.urlopen(req2, timeout=300) as resp2:
-                        llama_data = resp2.read()
+                    llama_data = fetch(llama_url, "downloading 2/2 (bins)", 0)
 
                 self._set_progress_signal.emit("extracting...")
 
@@ -1639,8 +1734,9 @@ class LLMLauncher(QMainWindow):
                 self._refresh_versions_signal.emit()
             except Exception as e:
                 self._log_signal.emit(f"Download error: {e}")
+                self._set_progress_signal.emit(f"download failed: {e}")
             finally:
-                self._set_progress_signal.emit("")
+                pass
 
         threading.Thread(target=worker, daemon=True).start()
 

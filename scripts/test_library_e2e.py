@@ -56,59 +56,70 @@ def main() -> int:
 
         app = QApplication([])
 
-        cfg = {"model_root": str(root), "library": {}}
-        records = {"beellama.cpp|qwen3.8-27b-IQ4_XS-pure.gguf|c98304": {"mb": 15420}}
+        # ISOLATION: the dialog's _rescan persists via save_config(self.cfg)
+        # → without this, the e2e test overwrites the REAL launcher_config.json
+        # with the temp-root library (this is how test cache contaminated the
+        # user's config once). Point CONFIG_FILE at a scratch file instead.
+        real_config_file = launcher.CONFIG_FILE
+        scratch_cfg = HERE / "_libtest_tmp_config.json"
+        launcher.CONFIG_FILE = scratch_cfg
+        try:
+            cfg = {"model_root": str(root), "library": {}}
+            records = {"beellama.cpp|qwen3.8-27b-IQ4_XS-pure.gguf|c98304": {"mb": 15420}}
 
-        dlg = launcher.ModelLibraryDialog(cfg, records)
+            dlg = launcher.ModelLibraryDialog(cfg, records)
 
-        # 1) scan happened on first open (empty cache → _ensure_scan).
-        # All *.gguf files under root are cached; the decoy (not a real
-        # GGUF) is cached with meta: None and shows as "(unindexed)"-style.
-        lib = cfg.get("library", {})
-        assert lib, "library cache was not written on first open"
-        assert len(lib) == len(copied) + 1, f"expected {len(copied) + 1} cached, got {len(lib)}"
-        decoy_key = str(root / "decoy.gguf")
-        assert decoy_key in lib, "decoy missing from cache"
-        assert lib[decoy_key].get("meta") is None, "decoy parsed as GGUF?!"
-        for c in copied:
-            k = str(c)
-            assert k in lib and lib[k].get("meta"), f"real GGUF not indexed: {k}"
-        names = {os.path.basename(p) for p in lib}
-        print("cached:", sorted(names))
+            # 1) scan happened on first open (empty cache → _ensure_scan).
+            # All *.gguf files under root are cached; the decoy (not a real
+            # GGUF) is cached with meta: None and shows as "(unindexed)"-style.
+            lib = cfg.get("library", {})
+            assert lib, "library cache was not written on first open"
+            assert len(lib) == len(copied) + 1, f"expected {len(copied) + 1} cached, got {len(lib)}"
+            decoy_key = str(root / "decoy.gguf")
+            assert decoy_key in lib, "decoy missing from cache"
+            assert lib[decoy_key].get("meta") is None, "decoy parsed as GGUF?!"
+            for c in copied:
+                k = str(c)
+                assert k in lib and lib[k].get("meta"), f"real GGUF not indexed: {k}"
+            names = {os.path.basename(p) for p in lib}
+            print("cached:", sorted(names))
 
-        # 2) list filled, entries visible
-        assert dlg.list_w.count() >= 1, "list is empty"
-        row_texts = [dlg.list_w.item(i).text() for i in range(dlg.list_w.count())]
-        for t in row_texts:
-            print("row:", t.encode("ascii", "backslashreplace").decode())
+            # 2) list filled, entries visible
+            assert dlg.list_w.count() >= 1, "list is empty"
+            row_texts = [dlg.list_w.item(i).text() for i in range(dlg.list_w.count())]
+            for t in row_texts:
+                print("row:", t.encode("ascii", "backslashreplace").decode())
 
-        # 3) projector tag applied to mmproj files
-        tagged = [t for t in row_texts if "[projector]" in t]
-        assert tagged, "no [projector] tag on mmproj rows"
+            # 3) projector tag applied to mmproj files
+            tagged = [t for t in row_texts if "[projector]" in t]
+            assert tagged, "no [projector] tag on mmproj rows"
 
-        # 4) fit dot present on every row
-        for t in row_texts:
-            assert any(d in t for d in ("\U0001F7E2", "\U0001F7E1", "\U0001F534", "\u26AA")), t
+            # 4) fit dot present on every row
+            for t in row_texts:
+                assert any(d in t for d in ("\U0001F7E2", "\U0001F7E1", "\U0001F534", "\u26AA")), t
 
-        # 5) search filter narrows
-        dlg.search_ed.setText("qwen")
-        rows_qwen = dlg.list_w.count()
-        dlg.search_ed.setText("")
-        assert rows_qwen >= 1 and rows_qwen <= len(dlg._entries), "filter broken"
+            # 5) search filter narrows
+            dlg.search_ed.setText("qwen")
+            rows_qwen = dlg.list_w.count()
+            dlg.search_ed.setText("")
+            assert rows_qwen >= 1 and rows_qwen <= len(dlg._entries), "filter broken"
 
-        # 6) pick → selected_path
-        dlg.list_w.setCurrentRow(0)
-        dlg._pick()
-        assert dlg.selected_path, "nothing selected"
-        assert Path(dlg.selected_path).exists(), "selected file vanished"
-        print("selected:", dlg.selected_path)
+            # 6) pick → selected_path
+            dlg.list_w.setCurrentRow(0)
+            dlg._pick()
+            assert dlg.selected_path, "nothing selected"
+            assert Path(dlg.selected_path).exists(), "selected file vanished"
+            print("selected:", dlg.selected_path)
 
-        # 7) cache persistence contract: cfg["library"] paths exist on disk
-        for p in lib:
-            assert Path(p).exists(), f"cached path missing: {p}"
+            # 7) cache persistence contract: cfg["library"] paths exist on disk
+            for p in lib:
+                assert Path(p).exists(), f"cached path missing: {p}"
 
-        print("ALL OK")
-        return 0
+            print("ALL OK")
+            return 0
+        finally:
+            launcher.CONFIG_FILE = real_config_file
+            scratch_cfg.unlink(missing_ok=True)
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

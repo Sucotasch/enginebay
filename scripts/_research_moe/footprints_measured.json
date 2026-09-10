@@ -1,0 +1,8 @@
+{
+  "ik_llama.cpp|Qwen3.8-27B.i1-IQ4_KT-attn_qkv-IQ4_KS-MTP.gguf|c98304": {
+    "mb": 15204
+  },
+  "beellama.cpp|sophosympatheia_Magistry-24B-v1.1-Q4_K_L.gguf|c98304": {
+    "mb": 15237
+  }
+}
