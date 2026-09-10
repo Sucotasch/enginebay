@@ -13,12 +13,14 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 | `stop-llama.bat` | Kill server |
 | `Launcher.bat` | Open PyQt6 GUI (`launcher.py`) |
 | `launch-hermes-llama.bat` | Start server + Hermes with local provider |
-| `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection** |
+| `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection**, **VRAM guard + DLL diagnostics** |
 | `launcher_presets.json` | Saved configs: "Qwen3.8-27B" (port 8080), "Agentic AI" (port 8888), "Qwen3.8-27B (Bee KVarN)" |
+| `vram_records.json` | Measured VRAM footprints per model+engine+ctx (auto-written after each model load; feeds the guard) |
 | `configs/inference.env` | Server parameters |
 | `scripts/start_llama_cpp.sh` | Alternative launcher (Git Bash) |
 | `scripts/smoke_test.py` | Verify server is responding |
 | `scripts/update_opencode_models.py` | Refresh OpenCode Free models in `~/.dsh/settings.yaml` (see skill `dsh-providers`) |
+| `scripts/engine_diag.py` | CLI: `check <exe>` (missing-DLL report via PE import walk) and `vram` (PDH/DXGI free VRAM + per-process holders). Ported from Quartermaster (MIT) |
 
 ## Critical constraints
 
@@ -29,6 +31,23 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 - **`--reasoning auto` + `--jinja` required on Qwen3.8 (qwen35)** — `--reasoning off` breaks tools requests. (Upstream Qwen3.6-27B and Gemma use `--reasoning off`.)
 - **`-np 1` on Qwen3.8 presets** — auto parallel (`n_parallel=-1`) creates 4 slots × 96K KV cache, which tanks VRAM and drops speed to ~3.8 tok/s.
 - **Two ports**: 8080 (Qwen3.6/3.8-27B) and 8888 (Gemma 4 26B / Agentic). Do not mix presets.
+
+## VRAM guard + DLL diagnostics (launcher)
+
+Ported from Quartermaster (github.com/Quartermaster-Labs/Quartermaster, MIT — attribution kept in `scripts/engine_diag.py`).
+
+**DLL diagnostics** (`scripts/engine_diag.py check <exe>`): walks the PE import table (graph, app-dir→System32→SysWOW64→SystemRoot→PATH, api-ms-*/ext-ms-* skipped) and names missing DLLs with actionable advice (CUDA runtime / NVIDIA driver / VC++ / HIP). Wired into the launcher: checked before launch (advisory Yes/No) and re-run automatically when the server dies before "model loaded" (typical 0xC0000135 silent exit).
+
+**VRAM reading** (`scripts/engine_diag.py vram`): vendor-neutral, no nvidia-smi — PDH `\GPU Adapter Memory(*)\Dedicated Usage` (system-wide usage, grouped/summed per LUID) + classic DXGI `IDXGIFactory::EnumAdapters`/`GetDesc` (total; matched to the PDH adapter by LUID). Free = total − used. Also lists per-process VRAM holders via PDH `\GPU Process Memory(*)` (pid from instance names).
+
+**Guard behavior** (in `launcher.py` `_vram_guard`, reserve = 512 MB — below ~100 MB free llama.cpp offloads to RAM instead of crashing):
+- 🟢 free ≥ need + 0.5 GB → silent launch
+- 🟡 need ≤ free < need + 0.5 GB → log + status bar, launch
+- 🔴 free < need **and need is MEASURED** → modal, EVERY launch (nothing remembered): Launch anyway / Smaller context (one-launch `-c` shrink: weights + KV·ratio ≤ budget; preset untouched) / Who holds VRAM (live holder list; own llama-* servers stop freely, other inference apps stop with warning, browsers/games display-only) / Re-measure (2.5 s driver settle)
+- 🔴 free < need **but only estimated** → warn only, launch — an estimate NEVER blocks (first launch of a new model must work)
+- ⚪ PDH/DXGI unavailable → launch without check
+
+**Need value source**: `vram_records.json`, keyed `engine|model-basename|c<ctx>`. Real measurement = PDH system-wide delta between pre-launch baseline and post-"model loaded" snapshot (works on engines that don't print VRAM lines, e.g. beellama v0.4.5). Fallback estimate = GGUF file size + 2 GB buffer, always labelled "estimate". Presets are NEVER modified by the guard.
 
 ## How to run
 

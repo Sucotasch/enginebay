@@ -34,6 +34,13 @@ CONFIG_FILE = SCRIPT_DIR / "launcher_config.json"
 HISTORY_FILE = SCRIPT_DIR / "launcher_history.json"
 PRESETS_FILE = SCRIPT_DIR / "launcher_presets.json"
 
+# Engine diagnostics (DLL check + VRAM reading), optional import.
+try:
+    sys.path.insert(0, str(SCRIPT_DIR / "scripts"))
+    import engine_diag as diag
+except Exception:
+    diag = None  # guards and DLL hints degrade gracefully without it
+
 # --- Auto-discover Hermes ---
 def find_hermes_home() -> Path | None:
     candidates = [
@@ -396,6 +403,53 @@ def save_presets(presets: dict):
     PRESETS_FILE.write_text(json.dumps(presets, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ── VRAM records (measured per model+engine+ctx) ─────────────────────────
+
+VRAM_RECORDS_FILE = SCRIPT_DIR / "vram_records.json"
+VRAM_RESERVE_MB = 512   # green level: free >= need + this; yellow otherwise
+VRAM_BUF_EST_MB = 2048  # fallback: compute buffer + KV slack when unmeasured
+
+
+def load_vram_records() -> dict:
+    if VRAM_RECORDS_FILE.exists():
+        try:
+            return json.loads(VRAM_RECORDS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def save_vram_record(key: str, mb: int, meta: dict):
+    recs = load_vram_records()
+    recs[key] = {"mb": int(mb), "at": time.strftime("%Y-%m-%d %H:%M:%S"), **meta}
+    try:
+        VRAM_RECORDS_FILE.write_text(
+            json.dumps(recs, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def vram_need_key(model: str, engine_id: str, params: str) -> str:
+    """Stable key: engine|basename|ctx (ctx matters a lot for KV VRAM)."""
+    m = re.search(r"(?:^|\s)(?:-c|--ctx-size)\s+(\d+)", params)
+    ctx = m.group(1) if m else "?"
+    return f"{engine_id}|{os.path.basename(model)}|c{ctx}"
+
+
+def estimate_need_mb(model_path: str) -> int:
+    """Fallback 'how much VRAM this model wants' when nothing is measured yet.
+
+    Weights file size + slack. Crude (ignores per-arch KV math), so it is
+    always labelled 'estimate' in the UI and is replaced by the first real
+    measurement (PDH before/after model load) on the next launch.
+    """
+    try:
+        gguf_mb = os.path.getsize(model_path) // (1024 * 1024)
+        return gguf_mb + VRAM_BUF_EST_MB
+    except Exception:
+        return 0
+
+
 # --- Dark theme stylesheet ---
 DARK_STYLESHEET = """
 QMainWindow, QWidget {
@@ -567,6 +621,7 @@ class LLMLauncher(QMainWindow):
     _refresh_versions_signal = pyqtSignal()
     _on_exit_signal = pyqtSignal()
     _health_signal = pyqtSignal(str)
+    _vram_loaded_signal = pyqtSignal(str, str, str)  # engine_id, model, params
 
     def __init__(self):
         super().__init__()
@@ -581,6 +636,11 @@ class LLMLauncher(QMainWindow):
         self.presets = load_presets()
         self.log_file = None
         self.installed_versions: list[dict] = []
+        self.vram_baseline_mb: int | None = None  # used VRAM before launch (PDH)
+        self._server_ready = False                 # got "listening on" this launch
+        self._launch_model: str | None = None      # for post-load VRAM recording
+        self._launch_params: str | None = None
+        self._launch_engine: str | None = None
 
         self._log_signal.connect(self._log)
         self._set_status_signal.connect(self._set_status)
@@ -588,6 +648,7 @@ class LLMLauncher(QMainWindow):
         self._refresh_versions_signal.connect(self._refresh_versions_list)
         self._on_exit_signal.connect(self._on_process_exit)
         self._health_signal.connect(self._set_status)
+        self._vram_loaded_signal.connect(self._on_model_loaded)
 
         self._build_ui()
 
@@ -1336,6 +1397,45 @@ class LLMLauncher(QMainWindow):
             QMessageBox.warning(self, "Error", f"llama-server not found:\n{binary}")
             return
 
+        # DLL sanity check: a missing load-time dependency makes the process
+        # die instantly with 0xC0000135 and no output. Catch it before launch
+        # so the user gets an actionable message instead of a silent exit.
+        if diag is not None:
+            try:
+                problem = diag.hint(binary)
+                if problem:
+                    ret = QMessageBox.question(
+                        self, "Missing DLL",
+                        f"{problem}\n\n"
+                        f"Binary:\n{binary}\n\n"
+                        f"Launch anyway?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if ret != QMessageBox.StandardButton.Yes:
+                        self._log(f"Aborted: {problem}")
+                        return
+            except Exception:
+                pass  # DLL check is advisory; never block on its failure
+
+        # VRAM guard: warn (yellow) or ask (red) before launch. Presets are
+        # never modified — the dialog only offers options for this one launch.
+        vram_state, params = self._vram_guard(model, binary, params, host, port)
+        if vram_state == "abort":
+            self._log("Launch cancelled (VRAM guard)")
+            return
+
+        # Baseline VRAM (system-wide usage) BEFORE the process exists — the
+        # post-load snapshot delta against this is the model's real footprint.
+        self._launch_model, self._launch_params = model, params
+        self._launch_engine = self._current_engine_id()
+        self._server_ready = False
+        self.vram_baseline_mb = None
+        if diag is not None:
+            try:
+                self.vram_baseline_mb = diag.vram_snapshot().get("used_mb")
+            except Exception:
+                pass
+
         try:
             # Build argv as a list (no shell) so nested quotes in params
             # (e.g. --chat-template-kwargs "{...}") survive verbatim.
@@ -1366,6 +1466,300 @@ class LLMLauncher(QMainWindow):
         self._set_status("loading")
 
         threading.Thread(target=self._read_output, daemon=True).start()
+
+    # ── VRAM guard ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _mb_str(mb: int) -> str:
+        return f"{mb/1024:.1f} GB" if mb >= 1024 else f"{mb} MB"
+
+    def _vram_need_mb(self, model: str, engine_id: str, params: str) -> tuple[int, bool]:
+        """(need_mb, is_measured). Measured = a vram_records.json entry for this
+        model+engine+ctx; else a labelled estimate (weights file + buffer)."""
+        recs = load_vram_records()
+        rec = recs.get(vram_need_key(model, engine_id, params))
+        if rec and rec.get("mb"):
+            return int(rec["mb"]), True
+        return estimate_need_mb(model), False
+
+    def _vram_guard(self, model, binary, params, host, port) -> tuple[str, str]:
+        """Returns (state, params): state 'ok' | 'abort'.
+
+        🟢 free ≥ need + reserve        → silent ok
+        🟡 need ≤ free < need + reserve  → log + statusbar, ok
+        🔴 free < need AND measured      → modal dialog (every time); may
+                                           return shrunk-ctx params for this
+                                           one launch (presets never touched)
+        🔴 free < need BUT only estimated → log warn, ok — an estimate never
+                                           blocks (first launches must work)
+        ⚪ can't measure                  → ok, status quo
+        """
+        if diag is None:
+            return "ok", params
+        try:
+            snap = diag.vram_snapshot()
+        except Exception:
+            return "ok", params
+        free_mb = snap.get("free_mb")
+        if not free_mb:
+            return "ok", params  # can't measure → status quo
+
+        need_mb, measured = self._vram_need_mb(model, self._current_engine_id(), params)
+        if not need_mb:
+            return "ok", params
+
+        if free_mb >= need_mb + VRAM_RESERVE_MB:
+            return "ok", params  # 🟢 green
+
+        need_s, free_s = self._mb_str(need_mb), self._mb_str(free_mb)
+        approx = "" if measured else " (estimate — уточнится после первого запуска)"
+
+        if free_mb >= need_mb or not measured:
+            # 🟡 yellow: fits under the reserve, or unmeasured (never block).
+            self._log(f"VRAM warn: need ≈{need_s}{approx}, free {free_s} "
+                      f"(reserve {VRAM_RESERVE_MB} MB) — starting anyway")
+            try:
+                self.statusBar().showMessage(
+                    f"⚠ VRAM: need ≈{need_s}, free {free_s}", 15000)
+            except Exception:
+                pass
+            return "ok", params
+
+        # 🔴 red with a MEASURED need: ask, every time.
+        return self._vram_red_dialog(model, params, host, port,
+                                     free_mb, need_mb)
+
+    def _vram_red_dialog(self, model, params, host, port,
+                         free_mb: int, need_mb: int) -> tuple[str, str]:
+        """Red-level modal. Returns ('ok'|'abort', params_out)."""
+        while True:
+            free_s, need_s = self._mb_str(free_mb), self._mb_str(need_mb)
+            box = QMessageBox(self)
+            box.setWindowTitle("VRAM check")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(
+                f"Model needs ≈{need_s} (measured), but only {free_s} VRAM is free.\n\n"
+                f"Launching anyway offloads layers to RAM: much slower,\n"
+                f"possible UI freezes (it does NOT crash — llama.cpp degrades).\n\n"
+                f"{os.path.basename(model)} → {host}:{port}")
+            run_btn = box.addButton("Launch anyway", QMessageBox.ButtonRole.AcceptRole)
+            shrink_btn = box.addButton("Smaller context…", QMessageBox.ButtonRole.ActionRole)
+            holders_btn = box.addButton("Who holds VRAM…", QMessageBox.ButtonRole.ActionRole)
+            rescan_btn = box.addButton("Re-measure", QMessageBox.ButtonRole.ActionRole)
+            cancel_btn = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+
+            c = box.clickedButton()
+            if c is cancel_btn:
+                return "abort", params
+            if c is run_btn:
+                self._log(f"VRAM: launching anyway (need ≈{need_s}, free {free_s}) "
+                          f"— expect RAM offload")
+                return "ok", params
+            if c is rescan_btn:
+                # give the driver a moment to release a just-died process's VRAM
+                deadline = time.time() + 2.5
+                while time.time() < deadline:
+                    QApplication.processEvents()
+                    time.sleep(0.05)
+                try:
+                    snap = diag.vram_snapshot()
+                    nf = snap.get("free_mb")
+                    if nf is not None:
+                        free_mb = nf
+                        if nf >= need_mb:
+                            self._log(f"VRAM re-measured: free {self._mb_str(nf)} — enough, starting")
+                            return "ok", params
+                except Exception:
+                    pass
+                continue
+            if c is shrink_btn:
+                out = self._offer_shrink_context(params, model, need_mb, free_mb)
+                if out is None:
+                    continue  # cancelled or shrink can't help — back to dialog
+                return "ok", out
+            if c is holders_btn:
+                self._show_vram_holders()
+                continue  # holders may have freed VRAM — re-show with fresh text
+        # unreachable
+
+    def _offer_shrink_context(self, params: str, model: str,
+                              need_mb: int, free_mb: int) -> str | None:
+        """Offer a smaller -c for THIS launch only. Returns new params or None.
+
+        Math: need = weights + KV, only KV scales with context (linearly for
+        a fixed model/cache-type). Solves weights + kv*(new/cur) ≤ budget.
+        """
+        m = re.search(r"(^|\s)(?:-c|--ctx-size)\s+(\d+)", params)
+        if not m:
+            QMessageBox.information(
+                self, "Smaller context",
+                "No -c / --ctx-size in params — nothing to shrink.")
+            return None
+        cur = int(m.group(2))
+        budget = free_mb - VRAM_RESERVE_MB
+        try:
+            weights = os.path.getsize(model) // (1024 * 1024)
+        except OSError:
+            weights = 0
+        kv = max(need_mb - weights, 0)
+        if budget <= weights + 256:
+            QMessageBox.information(
+                self, "Smaller context",
+                f"Weights alone are ≈{self._mb_str(weights)}; with the "
+                f"{VRAM_RESERVE_MB} MB reserve nothing fits in {self._mb_str(free_mb)}.\n\n"
+                f"Shrinking context won't help — stop other VRAM consumers "
+                f"or use a smaller quant.")
+            return None
+        if kv <= 0:
+            QMessageBox.information(
+                self, "Smaller context",
+                "The measured need is weights-only; context is not the constraint here.")
+            return None
+        new_ctx = max(int(cur * (budget - weights) / kv), 1024)
+        new_ctx = min(new_ctx, cur)
+        if new_ctx >= cur:
+            QMessageBox.information(
+                self, "Smaller context",
+                f"Even -c 1024 would not fit (KV at {cur} ≈ {self._mb_str(kv)}).")
+            return None
+        new_params = params[:m.start(2)] + str(new_ctx) + params[m.end(2):]
+        est = weights + kv * new_ctx // cur
+        ret = QMessageBox.question(
+            self, "Smaller context",
+            f"Context: {cur:,} → {new_ctx:,} tokens\n"
+            f"Estimated need: {self._mb_str(est)} of {self._mb_str(free_mb)} free\n\n"
+            f"Launch with -c {new_ctx} for this run?\n"
+            f"(the preset and the params field are NOT modified)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ret != QMessageBox.StandardButton.Yes:
+            return None
+        self._log(f"VRAM: one-launch -c {cur} → {new_ctx} "
+                  f"(est. {self._mb_str(est)}; preset untouched)")
+        return new_params
+
+    @staticmethod
+    def _holder_class(name: str) -> str:
+        """'own' (our llama-* servers — stop freely), 'known' (other
+        inference apps — stop with warning), 'other' (display only)."""
+        n = name.lower().replace(" ", "-")  # "LM Studio.exe" -> "lm-studio.exe"
+        if n.startswith("llama-"):
+            return "own"
+        known = ("ollama", "comfyui", "comfy", "vllm", "tabbyapi",
+                 "lm-studio", "lmstudio", "sd-webui", "swebui")
+        if any(k in n for k in known):
+            return "known"
+        return "other"
+
+    def _show_vram_holders(self):
+        """Live VRAM holder list. Own llama-* servers and known inference
+        apps can be stopped from here (with confirmation); everything else
+        (browsers, games, dwm) is display-only — kill those via Task Manager.
+        """
+        if diag is None:
+            return
+        while True:
+            try:
+                snap = diag.vram_snapshot()
+            except Exception:
+                snap = {}
+            holders = snap.get("holders", [])
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Who holds VRAM")
+            dlg.resize(560, 440)
+            lay = QVBoxLayout(dlg)
+            total = snap.get("total_mb") or 0
+            free = snap.get("free_mb") or 0
+            lay.addWidget(QLabel(
+                f"Total {self._mb_str(total)} — free {self._mb_str(free)}\n"
+                f"☑ llama-* = own servers (stop freely) · ☑ inference apps "
+                f"(stop with warning) · plain rows = display only"))
+            lst = QListWidget(dlg)
+            for h in holders:
+                kind = self._holder_class(h["name"])
+                prefix = {"own": "[own] ", "known": "[app] ", "other": ""}[kind]
+                item = QListWidgetItem(
+                    f"{prefix}{h['name']}  —  {h['mb']} MB  (pid {h['pid']})")
+                if kind != "other":
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setCheckState(Qt.CheckState.Unchecked)
+                item.setData(Qt.ItemDataRole.UserRole, (h["pid"], kind))
+                lst.addItem(item)
+            lay.addWidget(lst)
+
+            row = QHBoxLayout()
+            stop_btn = QPushButton("Stop selected")
+            rescan_btn = QPushButton("Re-scan")
+            close_btn = QPushButton("Close")
+            row.addWidget(stop_btn)
+            row.addWidget(rescan_btn)
+            row.addStretch()
+            row.addWidget(close_btn)
+            lay.addLayout(row)
+
+            def stop_selected():
+                picked = []
+                for i in range(lst.count()):
+                    it = lst.item(i)
+                    if it.checkState() == Qt.CheckState.Checked:
+                        picked.append(it.data(Qt.ItemDataRole.UserRole))
+                if not picked:
+                    return
+                listing = "\n".join(f"  pid {pid} ({kind})" for pid, kind in picked)
+                warn = "" if all(k == "own" for _, k in picked) else \
+                    "\n\nWARNING: inference apps may lose unfinished work."
+                ret = QMessageBox.question(
+                    dlg, "Stop processes?",
+                    f"Stop {len(picked)} process(es)?\n{listing}{warn}",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if ret != QMessageBox.StandardButton.Yes:
+                    return
+                for pid, _ in picked:
+                    try:
+                        subprocess.run(f"taskkill /F /T /PID {pid}", shell=True,
+                                      capture_output=True, timeout=5)
+                    except Exception:
+                        pass
+                dlg.accept()  # reopen with a fresh scan
+
+            stop_btn.clicked.connect(stop_selected)
+            rescan_btn.clicked.connect(dlg.accept)
+            close_btn.clicked.connect(dlg.reject)
+            if dlg.exec() == QDialog.DialogCode.Rejected:
+                return
+            # accepted (stopped or rescanned) → loop rebuilds with fresh data
+
+    def _on_model_loaded(self, engine_id: str, model: str, params: str):
+        """Model finished loading: mark ready, record the real VRAM footprint
+        (system-wide usage delta between pre-launch and post-load PDH snaps)."""
+        self._server_ready = True
+        if diag is None or self.vram_baseline_mb is None:
+            return
+        try:
+            snap = diag.vram_snapshot()
+        except Exception:
+            return
+        now = snap.get("used_mb")
+        if not now:
+            return
+        used = now - self.vram_baseline_mb
+        if used < 64:  # suspicious: server died before load, or model in RAM
+            self._log(f"VRAM: model-load delta {used} MB — not recorded (too small)")
+            return
+        key = vram_need_key(model, engine_id, params)
+        save_vram_record(key, used, {
+            "model": os.path.basename(model), "engine": engine_id,
+            "ctx": re.search(r"(?:^|\s)(?:-c|--ctx-size)\s+(\d+)", params).group(1)
+                  if re.search(r"(?:^|\s)(?:-c|--ctx-size)\s+(\d+)", params) else "?",
+        })
+        self._log(f"VRAM: measured {used} MB for this model+ctx (saved for next time)")
+
+    @staticmethod
+    def _is_model_loaded_line(line: str) -> bool:
+        """llama-server markers: 'model loaded' (beellama/upstream) or
+        'listening on http' — both fire when VRAM is fully allocated."""
+        l = line.lower()
+        return "model loaded" in l or "listening on http" in l
 
     def _stop_server(self):
         """Kill ONLY the process this launcher started (by PID tree).
@@ -1443,21 +1837,45 @@ class LLMLauncher(QMainWindow):
     def _read_output(self):
         if not self.process or not self.process.stdout:
             return
+        vram_fired = False
         try:
             for line in iter(self.process.stdout.readline, b""):
                 text = line.decode("utf-8", errors="replace").rstrip()
                 if text:
                     self._log_signal.emit(text)
+                    if (not vram_fired and self._launch_model
+                            and self._is_model_loaded_line(text)):
+                        vram_fired = True
+                        self._vram_loaded_signal.emit(
+                            self._launch_engine or "",
+                            self._launch_model,
+                            self._launch_params or "")
         except Exception:
             pass
         finally:
             self._on_exit_signal.emit()
 
     def _on_process_exit(self):
+        exited_before_ready = bool(self._launch_model and not self._server_ready)
         self.process = None
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self._set_status("offline")
+
+        # Early death with no "model loaded": typical 0xC0000135 (missing
+        # DLL) — silent, no stdout. Run the PE import-table walk and name
+        # the missing DLL instead of leaving the user with a bare exit.
+        if exited_before_ready and diag is not None:
+            binary = self.bin_entry.text().strip()
+            def dll_hint():
+                try:
+                    msg = diag.hint(binary) if binary else ""
+                except Exception:
+                    msg = ""
+                if msg:
+                    self._log_signal.emit(f"⚠ {msg}")
+            threading.Thread(target=dll_hint, daemon=True).start()
+        self._server_ready = False
 
     # ── Health monitor ──────────────────────────────────────────────
 
