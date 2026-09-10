@@ -25,3 +25,5 @@ llama.log
 
 # Measured VRAM footprints — machine-local state, not portable
 vram_records.json
+
+scripts/_libtest_tmp/
