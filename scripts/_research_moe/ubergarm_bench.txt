@@ -1,0 +1,106 @@
+"All things leave behind them the Obscurity... and go forward to embrace the Brightness..." — Dao De Jing #42 - Q: Who provides the best GGUFs now? - A: They're
+all pretty good. Skip down if you just want graphs and numbers comparing various Qwen3-30B-A3B GGUF quants. It's been well over a year since TheBloke uploaded
+his last quant to huggingface. The LLM landscape has changed markedly since then with many new models being released monthly, new inference engines targeting
+specific hardware optimizations, and ongoing evolution of quantization algorithims. Our community continues to grow and diversify at an amazing rate.
+Fortunately, many folks and organizations have kindly stepped-up to keep the quants cooking so we can all find an LLM sized just right to fit on our home rigs.
+Amongst them bartowski, and unsloth (Daniel and Michael's start-up company), have become the new "household names" for providing a variety of GGUF quantizations
+for popular model releases and even all those wild creative fine-tunes! (There are many more including team mradermacher and too many to list everyone, sorry!)
+Until recently most GGUF style quants' recipes were "static" meaning that all the tensors and layers were quantized the same e.g. Q8_0 or with consistent
+patterns defined in llama.cpp's code. So all quants of a given size were mostly the same regardless of who cooked and uploaded it to huggingface. Things began
+to change over a year ago with major advancements like importance matrix quantizations by ikawrakow in llama.cpp PR#4861 as well as new quant types (like the
+perennial favorite IQ4_XS) which have become the mainstay for users of llama.cpp, ollama, koboldcpp, lmstudio, etc. The entire GGUF ecosystem owes a big thanks
+to not just to ggerganov but also ikawrakow (as well as the many more contributors). Very recently unsloth introduced a few changes to their quantization
+methodology that combine different imatrix calibration texts and context lengths along with making some tensors/layers different sizes than the regular
+llama.cpp code (they had a public fork with their branch, but have to update and re-push due to upstream changes). They have named this change in standard
+methodology Unsloth Dynamic 2.0 GGUFs as part of their start-up company's marketing strategy. Around the same time bartowski has been experimenting with
+different imatrix calibration texts and opened a PR to llama.cpp modifying the default tensor/layer quantization recipes. I myself began experimenting with
+custom "dynamic" quantization recipes using ikawrakow's latest SOTA quants like iq4_k which to-date only work on his ik_llama.cpp fork. While this is great news
+for all GGUF enjoyers, the friendly competition and additional options have led to some confusion and I dare say some "tribalism". (If part of your identity as
+a person depends on downloading quants from only one source, I suggest you google: "Nan Yar?"). So how can you, dear reader, decide which is the best quant of a
+given model for you to download? unsloth already did a great blog post discussing their own benchmarks and metrics. Open a tab to check out u/AaronFeng47's many
+other benchmarks. And finally, this post contains even more metrics and benchmarks. The best answer I have is "Nullius in verba, (Latin for "take nobody's word
+for it") — even my word! Unfortunately, this means there is no one-size-fits-all rule, "X" is not always better than "Y", and if you want to min-max-optimize
+your LLM for your specific use case on your specific hardware you probably will have to experiment and think critically. If you don't care too much, then pick
+the any of biggest quants that fit on your rig for the desired context length and you'll be fine because: they're all pretty good. And with that, let's dive
+into the Qwen3-30B-A3B benchmarks below! Shout out to Wendell and the Level1Techs crew, the L1T Forums, and the L1T YouTube Channel! BIG thanks for providing
+BIG hardware expertise and access to run these experiments and make great quants available to the community!!! 👈 Qwen3-30B-A3B Benchmark Suite Graphs Note
+<think> mode was disabled for these tests to speed up benchmarking. 👈 Qwen3-30B-A3B Perplexity and KLD Graphs Using the BF16 as baseline for KLD stats. Also
+note the perplexity was lowest ("best") for models other than the bf16 which is not typically the case unless there was possibly some QAT going on. As such, the
+chart is relative to the lowest perplexity score: PPL/min(PPL)-1 plus a small eps for scaling. wiki.test.raw (lower is "better") ubergarm-kdl-test-corpus.txt
+(lower is "better") (lower is "better") (lower is "better") 👈 Qwen3-235B-A22B Perplexity and KLD Graphs Not as many data points here but just for comparison.
+Keep in mind the Q8_0 was the baseline for KLD stats given I couldn't easily run the full BF16. wiki.test.raw (lower is "better") ubergarm-kdl-test-corpus.txt
+(lower is "better") (lower is "better") (lower is "better") 👈 Qwen3-30B-A3B Speed llama-sweep-bench Graphs llama.cpp ik_llama.cpp NOTE: Keep in mind ik's fork
+is faster than mainline llama.cpp for many architectures and configurations especially only-CPU, hybrid-CPU+GPU, and DeepSeek MLA cases. 👈 Perplexity, KLD, and
+imatrix Methodology PPL and KLD testing done with ik_llama.cpp@9ba36270. I adjust ngl and threads for larger 235B models. CUDA_VISIBLE_DEVICES="0" \
+./build/bin/llama-perplexity \ -m "$model" \ --ctx-size 512 \ --ubatch-size 512 \ -f wiki.test.raw \ -fa \ -ngl 99 \ --seed 1337 \ --threads 1 I adjust ngl and
+threads for larger 235B models. For 235B I had to use the Q8_0 as the baseline given this rig can't easily run the full 400+GiB BF16. CUDA_VISIBLE_DEVICES="0" \
+./build/bin/llama-perplexity \ -m "$model" \ --kl-divergence-base /mnt/raid/models/ubergarm/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-BF16-ubergarm-kld-test-corpus-
+base.dat \ --kl-divergence \ -f ubergarm-kld-test-corpus.txt \ -fa \ -ngl 99 \ --seed 1337 \ --threads 1 This is how I make my imatrix using ik_llama.cpp to
+additionaly print out cosine similarity data to inform possible custom quant strategies. I haven't seen how exactly unsloth makes their new recipe.
+CUDA_VISIBLE_DEVICES="0" \ ./build/bin/llama-imatrix \ --verbosity 1 \ --layer-similarity \ -m
+/mnt/raid/models/Qwen/Qwen3-30B-A3B/Qwen3-30B-A3B-BF16-00001-of-00002.gguf \ -f calibration_data_v5_rc.txt \ -o
+/mnt/raid/models/ubergarm/Qwen3-30B-A3B-GGUF/imatrix-Qwen3-30B-A3B.dat \ --ctx-size 512 \ -ngl 36 \ --threads 16 ======================== sorted layer
+importances 0: Layer 0, <cos_sim> = 0.32154 1: Layer 47, <cos_sim> = 0.38473 2: Layer 1, <cos_sim> = 0.736987 3: Layer 28, <cos_sim> = 0.845492 4: Layer 2,
+<cos_sim> = 0.847391 5: Layer 29, <cos_sim> = 0.859291 6: Layer 7, <cos_sim> = 0.861405 7: Layer 3, <cos_sim> = 0.878313 8: Layer 8, <cos_sim> = 0.893971 9:
+Layer 6, <cos_sim> = 0.900308 10: Layer 42, <cos_sim> = 0.911525 11: Layer 5, <cos_sim> = 0.912156 12: Layer 17, <cos_sim> = 0.913169 13: Layer 4, <cos_sim> =
+0.914095 14: Layer 13, <cos_sim> = 0.92175 15: Layer 46, <cos_sim> = 0.925283 16: Layer 19, <cos_sim> = 0.926845 17: Layer 18, <cos_sim> = 0.927019 18: Layer
+45, <cos_sim> = 0.928896 19: Layer 40, <cos_sim> = 0.934481 20: Layer 31, <cos_sim> = 0.934585 21: Layer 14, <cos_sim> = 0.936932 22: Layer 16, <cos_sim> =
+0.940338 23: Layer 25, <cos_sim> = 0.940477 24: Layer 10, <cos_sim> = 0.942312 25: Layer 38, <cos_sim> = 0.943166 26: Layer 9, <cos_sim> = 0.943843 27: Layer
+11, <cos_sim> = 0.944233 28: Layer 37, <cos_sim> = 0.944325 29: Layer 20, <cos_sim> = 0.94612 30: Layer 22, <cos_sim> = 0.946449 31: Layer 41, <cos_sim> =
+0.946775 32: Layer 39, <cos_sim> = 0.947228 33: Layer 44, <cos_sim> = 0.947687 34: Layer 30, <cos_sim> = 0.947942 35: Layer 23, <cos_sim> = 0.949102 36: Layer
+12, <cos_sim> = 0.951618 37: Layer 21, <cos_sim> = 0.951701 38: Layer 24, <cos_sim> = 0.952261 39: Layer 43, <cos_sim> = 0.953357 40: Layer 27, <cos_sim> =
+0.953528 41: Layer 26, <cos_sim> = 0.95575 42: Layer 32, <cos_sim> = 0.956024 43: Layer 15, <cos_sim> = 0.956915 44: Layer 35, <cos_sim> = 0.959861 45: Layer
+36, <cos_sim> = 0.960591 46: Layer 34, <cos_sim> = 0.961539 47: Layer 33, <cos_sim> = 0.968161 ======================== sorted attention importances 0: Layer 0,
+<cos_sim> = 0.353019 1: Layer 45, <cos_sim> = 0.638476 2: Layer 1, <cos_sim> = 0.674894 3: Layer 29, <cos_sim> = 0.686547 4: Layer 17, <cos_sim> = 0.708034 5:
+Layer 3, <cos_sim> = 0.718456 6: Layer 21, <cos_sim> = 0.72082 7: Layer 44, <cos_sim> = 0.732611 8: Layer 22, <cos_sim> = 0.738435 9: Layer 18, <cos_sim> =
+0.742531 10: Layer 42, <cos_sim> = 0.745018 11: Layer 8, <cos_sim> = 0.746792 12: Layer 24, <cos_sim> = 0.750162 13: Layer 23, <cos_sim> = 0.750384 14: Layer 9,
+<cos_sim> = 0.754324 15: Layer 46, <cos_sim> = 0.758528 16: Layer 33, <cos_sim> = 0.76019 17: Layer 47, <cos_sim> = 0.760449 18: Layer 27, <cos_sim> = 0.760966
+19: Layer 4, <cos_sim> = 0.761774 20: Layer 2, <cos_sim> = 0.762337 21: Layer 6, <cos_sim> = 0.763453 22: Layer 34, <cos_sim> = 0.765167 23: Layer 30, <cos_sim>
+= 0.768629 24: Layer 25, <cos_sim> = 0.768819 25: Layer 26, <cos_sim> = 0.769841 26: Layer 20, <cos_sim> = 0.77039 27: Layer 10, <cos_sim> = 0.772251 28: Layer
+41, <cos_sim> = 0.773975 29: Layer 35, <cos_sim> = 0.774599 30: Layer 43, <cos_sim> = 0.775401 31: Layer 11, <cos_sim> = 0.776914 32: Layer 28, <cos_sim> =
+0.778543 33: Layer 19, <cos_sim> = 0.781975 34: Layer 36, <cos_sim> = 0.78645 35: Layer 32, <cos_sim> = 0.790626 36: Layer 15, <cos_sim> = 0.795375 37: Layer
+12, <cos_sim> = 0.797279 38: Layer 16, <cos_sim> = 0.797483 39: Layer 14, <cos_sim> = 0.797921 40: Layer 7, <cos_sim> = 0.80098 41: Layer 5, <cos_sim> =
+0.802361 42: Layer 37, <cos_sim> = 0.805299 43: Layer 13, <cos_sim> = 0.806054 44: Layer 31, <cos_sim> = 0.807454 45: Layer 38, <cos_sim> = 0.808983 46: Layer
+40, <cos_sim> = 0.813216 47: Layer 39, <cos_sim> = 0.816557 ======================== sorted ffn importances 0: Layer 47, <cos_sim> = 0.613059 1: Layer 44,
+<cos_sim> = 0.630819 2: Layer 0, <cos_sim> = 0.653987 3: Layer 28, <cos_sim> = 0.686159 4: Layer 16, <cos_sim> = 0.693473 5: Layer 7, <cos_sim> = 0.694612 6:
+Layer 43, <cos_sim> = 0.710648 7: Layer 20, <cos_sim> = 0.71511 8: Layer 21, <cos_sim> = 0.715567 9: Layer 46, <cos_sim> = 0.71785 10: Layer 45, <cos_sim> =
+0.718143 11: Layer 1, <cos_sim> = 0.726385 12: Layer 3, <cos_sim> = 0.735632 13: Layer 8, <cos_sim> = 0.736597 14: Layer 2, <cos_sim> = 0.737616 15: Layer 22,
+<cos_sim> = 0.739272 16: Layer 33, <cos_sim> = 0.739951 17: Layer 19, <cos_sim> = 0.740003 18: Layer 9, <cos_sim> = 0.742748 19: Layer 32, <cos_sim> = 0.747542
+20: Layer 23, <cos_sim> = 0.749229 21: Layer 24, <cos_sim> = 0.755807 22: Layer 41, <cos_sim> = 0.75653 23: Layer 10, <cos_sim> = 0.757337 24: Layer 34,
+<cos_sim> = 0.758472 25: Layer 31, <cos_sim> = 0.759585 26: Layer 40, <cos_sim> = 0.763913 27: Layer 17, <cos_sim> = 0.768032 28: Layer 26, <cos_sim> = 0.768999
+29: Layer 18, <cos_sim> = 0.771782 30: Layer 6, <cos_sim> = 0.776553 31: Layer 4, <cos_sim> = 0.777394 32: Layer 27, <cos_sim> = 0.777827 33: Layer 35,
+<cos_sim> = 0.778635 34: Layer 42, <cos_sim> = 0.779552 35: Layer 36, <cos_sim> = 0.779963 36: Layer 25, <cos_sim> = 0.785371 37: Layer 12, <cos_sim> = 0.785794
+38: Layer 29, <cos_sim> = 0.787757 39: Layer 5, <cos_sim> = 0.79259 40: Layer 11, <cos_sim> = 0.793774 41: Layer 15, <cos_sim> = 0.796992 42: Layer 30,
+<cos_sim> = 0.797935 43: Layer 14, <cos_sim> = 0.7999 44: Layer 39, <cos_sim> = 0.806665 45: Layer 38, <cos_sim> = 0.813561 46: Layer 13, <cos_sim> = 0.820982
+47: Layer 37, <cos_sim> = 0.830343 👈 Benchmarking Methodology The benchmark client used is bartowski's patched evalchemy fork containing fixes for easier use
+across a variety of LLM server API endpoints. Benchmark test suite testing done with llama.cpp@36667c8e on a subset of models. For llama.cpp server: cd
+llama.cpp git checkout 36667c8e cmake -B build -DGGML_CUDA=ON cmake --build build --config Release -j $(nproc)
+model=/mnt/raid/models/bartowski/Qwen_Qwen3-30B-A3B-GGUF/Qwen_Qwen3-30B-A3B-IQ2_M.gguf name=bartowski/Qwen3-30B-A3B-IQ2_M CUDA_VISIBLE_DEVICES="1" \
+./build/bin/llama-server \ --model "$model" \ --alias "$name" \ --api-key super-secret-change-me \ -fa \ -ctk f16 -ctv f16 \ -c 262144 \ --parallel 8 \ --slots
+\ -ngl 99 \ --threads 1 \ --host 127.0.0.1 \ --port 8088 For ik_llama.cpp server: cd ik_llama.cpp git checkout e3fec173 cmake -B build -DGGML_CUDA=ON cmake
+--build build --config Release -j $(nproc) model=/mnt/raid/models/ubergarm/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-mix-IQ4_K.gguf name=ubergarm/Qwen3-30B-A3B-mix-IQ4_K
+CUDA_VISIBLE_DEVICES="1" \ ./build/bin/llama-server \ --model "$model" \ --alias "$name" \ --api-key super-secret-change-me \ -fmoe \ -fa \ -ctk f16 -ctv f16 \
+-c 262144 \ --parallel 8 \ -ngl 99 \ --threads 1 \ --host 127.0.0.1 \ --port 8088 For vllm server: CUDA_VISIBLE_DEVICES="1" \
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \ VLLM_USE_MODELSCOPE=True \ vllm \ serve swift/Qwen3-30B-A3B-AWQ \ --served-model-name Qwen3-30B-A3B-AWQ \
+--gpu-memory-utilization 0.9 \ --max-model-len 32768 \ --max-num-seqs 64 \ --api-key super-secret-change-me \ --host 127.0.0.1 \ --port 8080 👈 Speed Benchmark
+Methodology Note probably no warmup, I saw a PR on ik's fork about it so the first data point trends low.cd llama.cpp git ug/port-sweep-bench #
+llama.cpp@814f795e + ug/port-sweep-bench cmake -B build -DGGML_CUDA=ON cmake --build build --config Release -j $(nproc)
+#model=/mnt/astrodata/llm/models/bartowski/Qwen_Qwen3-30B-A3B-GGUF/Qwen_Qwen3-30B-A3B-Q4_K_M.gguf
+#model=/mnt/astrodata/llm/models/bartowski/Qwen_Qwen3-30B-A3B-GGUF/Qwen_Qwen3-30B-A3B-Q2_K_L.gguf
+#model=/mnt/astrodata/llm/models/bartowski/Qwen_Qwen3-30B-A3B-GGUF/Qwen_Qwen3-30B-A3B-IQ2_M.gguf
+#model=/mnt/astrodata/llm/models/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-Q2_K_XL.gguf
+#model=/mnt/astrodata/llm/models/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ2_M.gguf
+model=/mnt/astrodata/llm/models/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-Q4_K_XL.gguf CUDA_VISIBLE_DEVICE=0 \ ./build/bin/llama-sweep-bench \ --model
+"$model" \ -fa \ -ctk f16 -ctv f16 \ -c 32768 \ -ngl 99 \ --threads 1 \ 👈 Perplexity, KLD, and Δp Raw Data Table Parsed this data from a bunch of logs generated
+above. It is not in the most beautiful order so feel free to copy paste into google docs or however you'd like to make your own graphs. 👈 Benchmark Suite Raw
+Data Table TODO copy/paste it all somewhere if there is enough interest. 👈 llama-sweep-bench Speed Data 👈 PPL, KLD, Δp Statistics In general these attempt to
+systematically measure the difference an unquantized model and a given quantized version. In general lower is better as it signals the quantized version
+performs more similarly to the original. Quantization is the process of compressing an original model's weights to shrink it down to run on limited hardware.
+Ideally the process minimizes errors and preserves the original uncompressed model's performance. Perplexity (PPL) is a metric used to evaluate how well a
+language model predicts text. It essentially measures how "surprised" the model is by a given text—if the model is good at predicting the next word, the
+perplexity is low. For example, a model that generates coherent, contextually accurate text will have lower perplexity than one that produces random or
+nonsensical output. In the context of LLM quantization (e.g., reducing model precision to save resources), perplexity is used to check if the compressed model
+retains its language understanding. Generally the PPL of the unquantized model is expected to be lower than the PPL of a quantized version. However, in
+quantization-aware training (QAT), the model is trained to handle lower-precision weights (e.g., from bf16 to int4) during training, simulating the effects of
+quantization. This helps the model adapt to the reduced precision, potentially maintaining performance even after quantization. The PPL of the unquantized bf16
+model might not always be lower because th

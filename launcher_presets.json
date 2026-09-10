@@ -48,5 +48,15 @@
     "params": "-c 98304 -np 1 -fa on -t 5 -ctk q5_0 -ctv q5_0 --kv-tail-tokens 1024 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
     "port": "8888"
+  },
+  "Qwen3.6-35B-A3B (Bee MoE)": {
+    "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified --n-cpu-moe 21 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
+    "host": "127.0.0.1",
+    "port": "8888"
+  },
+  "Gemma-4-26B-A4B (Bee MoE)": {
+    "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified --n-cpu-moe 6 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
+    "host": "127.0.0.1",
+    "port": "8888"
   }
 }

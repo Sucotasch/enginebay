@@ -27,3 +27,4 @@ llama.log
 vram_records.json
 
 scripts/_libtest_tmp/
+.agents/

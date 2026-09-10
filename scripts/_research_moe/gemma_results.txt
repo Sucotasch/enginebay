@@ -1,0 +1,43 @@
+﻿
+===== g_ncmoe30_all =====
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |         30 |   1 |           pp512 |       205.60 � 21.64 |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |         30 |   1 |           tg128 |         17.03 � 0.71 |
+
+build: 476aa6c4b (11610)
+
+
+===== g_ncmoe15 =====
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |         15 |   1 |           pp512 |       456.72 � 15.66 |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |         15 |   1 |           tg128 |         32.42 � 0.38 |
+
+build: 476aa6c4b (11610)
+
+
+===== g_ncmoe8 =====
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |          8 |   1 |           pp512 |       763.43 � 32.51 |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |          8 |   1 |           tg128 |         48.73 � 0.95 |
+
+build: 476aa6c4b (11610)
+
+
+===== g_ncmoe15_ub4k =====
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe | n_batch | n_ubatch |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | ------: | -------: | --: | --------------: | -------------------: |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |         15 |    4096 |     4096 |   1 |           pp512 |       457.34 � 13.22 |
+| gemma4 26B.A4B Q4_K - Medium   |  15.70 GiB |    25.23 B | CUDA       |  -1 |         15 |    4096 |     4096 |   1 |           tg128 |         32.16 � 0.50 |
+
+build: 476aa6c4b (11610)
+
+
+
+===== SUMMARY =====
+g_ncmoe30_all        0.7 min  build: 476aa6c4b (11610)
+g_ncmoe15            0.4 min  build: 476aa6c4b (11610)
+g_ncmoe8             0.3 min  build: 476aa6c4b (11610)
+g_ncmoe15_ub4k       0.4 min  build: 476aa6c4b (11610)

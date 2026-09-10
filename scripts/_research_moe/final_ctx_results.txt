@@ -1,0 +1,42 @@
+﻿
+===== qw_ncmoe22_32k =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 32768 -n 128 -r 1 -t 6 -fa on -ctk q4_0 -ctv q4_0 -b 2048 -ub 2048 -ncmoe 22
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe | n_ubatch | type_k | type_v |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | -------: | -----: | -----: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         22 |     2048 |   q4_0 |   q4_0 |   1 |         pp32768 |        790.05 � 0.00 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         22 |     2048 |   q4_0 |   q4_0 |   1 |           tg128 |         33.52 � 0.00 |
+
+===== qw_ncmoe20_32k =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 32768 -n 128 -r 1 -t 6 -fa on -ctk q4_0 -ctv q4_0 -b 2048 -ub 2048 -ncmoe 20
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe | n_ubatch | type_k | type_v |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | -------: | -----: | -----: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         20 |     2048 |   q4_0 |   q4_0 |   1 |         pp32768 |        318.09 � 0.00 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         20 |     2048 |   q4_0 |   q4_0 |   1 |           tg128 |         34.86 � 0.00 |
+
+===== qw_ncmoe18_32k =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 32768 -n 128 -r 1 -t 6 -fa on -ctk q4_0 -ctv q4_0 -b 2048 -ub 2048 -ncmoe 18
+python : Traceback (most recent call last):
+строка:1 знак:204
++ ... ce-server"; python "scripts\_research_moe\bench_final_ctx.py" 2>&1 |  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "D:\Arx\Software Downloads\Hermes copy\llm-inference-server\scripts\_research_moe\bench_final_ctx.py", line 72, 
+in <module>
+  File "D:\Arx\Software Downloads\Hermes copy\llm-inference-server\scripts\_research_moe\bench_final_ctx.py", line 43, 
+in main
+    encoding="utf-8", errors="replace", timeout=2400)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\works\Python\Lib\subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\works\Python\Lib\subprocess.py", line 1209, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\works\Python\Lib\subprocess.py", line 1630, in _communicate
+    raise TimeoutExpired(self.args, orig_timeout)
+subprocess.TimeoutExpired: Command '['D:\\Arx\\Software Downloads\\Hermes copy\\llm-inference-server\\beellama.cpp\\ver
+sions\\preview-v0.4.5-cuda-13.3\\llama-bench.exe', '-m', 'G:\\Ai\\lmstudio-community\\Qwen3.6-35B-A3B-GGUF\\Qwen3.6-35B
+-A3B-Q6_K.gguf', '-p', '32768', '-n', '128', '-r', '1', '-t', '6', '-fa', 'on', '-ctk', 'q4_0', '-ctv', 'q4_0', '-b', '
+2048', '-ub', '2048', '-ncmoe', '18']' timed out after 2400 seconds

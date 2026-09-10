@@ -1,0 +1,34 @@
+0.00.173.583 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.174.168 W srv  llama_server: -----------------
+0.00.174.176 W srv  llama_server: CORS is set to allow all origins ('*') and no API key is set
+0.00.174.181 W srv  llama_server: this can be a security risk (cross-origin attacks)
+0.00.174.182 W srv  llama_server: more info: https://github.com/ggml-org/llama.cpp/pull/25655
+0.00.174.182 W srv  llama_server: -----------------
+0.00.189.999 I srv    load_model: loading model 'G:\Ai\Models\Gemma Heretic\gemma-4-26b-a4b-it-heretic.q4_k_m.gguf'
+0.01.435.727 W common_fit_params: failed to fit params to free device memory: n_gpu_layers already set by user to 99, abort
+0.02.286.014 W load: override 'tokenizer.ggml.add_bos_token' to 'true' for Gemma4
+0.02.329.530 W load: control-looking token:     50 '<|tool_response>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.02.330.140 W load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.02.387.907 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+0.11.420.307 I cmn          init: llama threadpool init, n_threads = 5
+0.11.543.148 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 98304, kv_unified = 'true'
+0.11.554.873 W common_chat_try_specialized_template: detected an outdated gemma4 chat template, applying compatibility workarounds. Consider updating to the official template.
+0.11.557.159 I srv  llama_server: model loaded
+0.11.557.172 I srv  llama_server: listening on http://127.0.0.1:8099
+0.16.735.505 W common_chat_try_specialized_template: detected an outdated gemma4 chat template, applying compatibility workarounds. Consider updating to the official template.
+0.16.737.115 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.16.737.197 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.20.387.785 I slot print_timing: id  0 | task 0 | n_gen =    166, tg =  54.95 t/s, tg_3s =  55.28 t/s
+0.21.363.545 I slot print_timing: id  0 | task 0 | prompt eval time =     647.80 ms /    24 tokens (   26.99 ms per token,    37.05 tokens per second)
+0.21.363.554 I slot print_timing: id  0 | task 0 |        eval time =    3978.52 ms /   220 tokens (   18.17 ms per token,    55.05 tokens per second)
+0.21.363.555 I slot print_timing: id  0 | task 0 |       total time =    4626.32 ms /   244 tokens
+0.21.363.556 I slot print_timing: id  0 | task 0 |    graphs reused =        218
+0.21.363.603 I slot      release: id  0 | task 0 | stop processing: n_tokens = 243, truncated = 0
+0.21.369.407 W common_chat_try_specialized_template: detected an outdated gemma4 chat template, applying compatibility workarounds. Consider updating to the official template.
+0.21.391.607 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = 21196138
+0.21.400.511 I slot launch_slot_: id  0 | task 223 | processing task, is_child = 0
+0.24.097.416 I slot print_timing: id  0 | task 223 | prompt eval time =    2590.64 ms /  4171 tokens (    0.62 ms per token,  1610.03 tokens per second)
+0.24.097.424 I slot print_timing: id  0 | task 223 |        eval time =     106.23 ms /     4 tokens (   35.41 ms per token,    28.24 tokens per second)
+0.24.097.425 I slot print_timing: id  0 | task 223 |       total time =    2696.87 ms /  4175 tokens
+0.24.097.426 I slot print_timing: id  0 | task 223 |    graphs reused =        220
+0.24.097.623 I slot      release: id  0 | task 223 | stop processing: n_tokens = 4184, truncated = 0

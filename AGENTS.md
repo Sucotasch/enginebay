@@ -33,6 +33,25 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 - **`-np 1` on Qwen3.8 presets** — auto parallel (`n_parallel=-1`) creates 4 slots × 96K KV cache, which tanks VRAM and drops speed to ~3.8 tok/s.
 - **Two ports**: 8080 (Qwen3.6/3.8-27B) and 8888 (Gemma 4 26B / Agentic). Do not mix presets.
 
+## MoE models — measured optimal configs (2026-09-10 campaign)
+
+Full research: `scripts/_research_moe/RESEARCH.md` (sources + benchmark logs: `server_96k.jsonl`, `upstream_96k.jsonl`, `qwen_results.txt`, `gemma_edge.txt` etc). All numbers live-measured on this box (RTX 4070 Ti SUPER, i7-5820K, 64 GB RAM, beellama v0.4.5-cuda-13.3), 96K ctx, port 8099 test protocol.
+
+**The VRAM-edge law (most important finding):** fewer CPU-expert layers is NOT faster. Once the GPU part exceeds VRAM, the driver silently spills to WDDM shared memory and tg craters (33 → 6 t/s). The optimum is the largest GPU expert share that still fits with ~600+ MB headroom. The cliff is one layer wide: qw ncmoe20 fits (blade-edge), 18 spills; gm 4 fits (blade-edge), 2 spills.
+
+**Qwen3.6-35B-A3B Q6_K (qwen35moe)** — preset "Qwen3.6-35B-A3B (Bee MoE)": `--n-cpu-moe 21` (of 40 blocks), KV q4_0, `-b 2048 -ub 512 -t 5 -tb 6` → **~29.6 t/s tg / ~420 t/s pp**, 650 MB free. vs dense Qwen3.8-27B's 35.9 t/s — slower but 35B-total/A3B with 26.6 GB Q6_K quality.
+**Gemma-4-26B-A4B heretic Q4_K_M (gemma4)** — preset "Gemma-4-26B-A4B (Bee MoE)": `--n-cpu-moe 6` (of 30 blocks), same base → **~47.5 t/s tg / ~1530 t/s pp**, 660 MB free. Faster than every dense 27B we run.
+
+Measured negatives (do not retry blindly):
+- **MTP draft on the A3B** (mtp-Q8_0 +1.9 GB): 24-27.5 t/s in ALL tested combos (ncmoe 22/24/26) — never beats pure. The 3B-active MoE leaves no VRAM for the draft and acceptance doesn't cover the cost.
+- **KVarN cache on MoE archs**: qw 28.0 vs 33.0 q4_0; gm 34.0 vs 54.3 q4_0. KVarN is a dense-qwen35 optimization — on qwen35moe/gemma4 it costs VRAM AND speed. (Existing kvarn presets for DENSE Qwen3.8-27B stay valid.)
+- **ub > 512 at the edge**: ub1024 on qw ncmoe20 → 10.9 t/s (spill). DS-guide's `-b/-ub 4096` advice targets huge-CPU-weight rigs, inverts at our VRAM edge.
+- **threads 6**: 25.2/40.1 vs 29.0/47.2 at t5 — the 6th thread starves the GPU driver. Keep `-t 5 -tb 6`.
+- **Blade-edge configs are real but not preset material**: qw ncmoe20 (33 t/s, 150 MB free) and gm ncmoe4 (54 t/s, 160 MB free) run faster until any dwm/browser spike pushes them into WDDM spill — on a desktop system they flake (rep runs dropped to 26/44 t/s).
+- **Upstream llama.cpp b10712 loses to beellama on both MoE** (qw 26.8 vs 29.5; gm 42.7 vs 47.5) — beellama v0.4.5 is THE MoE engine here.
+
+Engine note: beellama's `--n-cpu-moe N` counts from the FIRST layers (help text + logs), upstream counts from the highest — a cross-engine preset is NOT portable without flipping N.
+
 ## VRAM guard + DLL diagnostics (launcher)
 
 Ported from Quartermaster (github.com/Quartermaster-Labs/Quartermaster, MIT — attribution kept in `scripts/engine_diag.py`).

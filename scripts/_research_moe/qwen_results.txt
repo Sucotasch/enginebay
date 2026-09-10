@@ -1,0 +1,69 @@
+﻿
+===== cmoe_all_ncmoe40 =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 512 -n 128 -r 2 -t 6 -ncmoe 40 -fa on
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         40 |   1 |           pp512 |       130.99 � 20.26 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         40 |   1 |           tg128 |         20.64 � 1.62 |
+
+build: 476aa6c4b (11610)
+
+
+===== ncmoe20 =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 512 -n 128 -r 2 -t 6 -ncmoe 20 -fa on
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         20 |   1 |           pp512 |       266.44 � 18.53 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         20 |   1 |           tg128 |         35.38 � 0.39 |
+
+build: 476aa6c4b (11610)
+
+
+===== ncmoe10 =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 512 -n 128 -r 2 -t 6 -ncmoe 10 -fa on
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         10 |   1 |           pp512 |         52.77 � 0.53 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         10 |   1 |           tg128 |          6.31 � 0.01 |
+
+build: 476aa6c4b (11610)
+
+
+===== ncmoe5 =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 512 -n 128 -r 2 -t 6 -ncmoe 5 -fa on
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |          5 |   1 |           pp512 |         55.81 � 0.64 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |          5 |   1 |           tg128 |          4.86 � 0.00 |
+
+build: 476aa6c4b (11610)
+
+
+===== ncmoe10_ub4096 =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 512 -n 128 -r 2 -t 6 -ncmoe 10 -fa on -b 4096 -ub 4096
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe | n_batch | n_ubatch |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | ------: | -------: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         10 |    4096 |     4096 |   1 |           pp512 |         52.48 � 0.14 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         10 |    4096 |     4096 |   1 |           tg128 |          6.29 � 0.01 |
+
+build: 476aa6c4b (11610)
+
+
+===== ncmoe10_ub1024 =====
+D:\Arx\Software Downloads\Hermes copy\llm-inference-server\beellama.cpp\versions\preview-v0.4.5-cuda-13.3\llama-bench.exe -m G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf -p 512 -n 128 -r 2 -t 6 -ncmoe 10 -fa on -b 1024 -ub 1024
+| model                          |       size |     params | backend    | ngl |  n_cpu_moe | n_batch | n_ubatch |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ---------: | ------: | -------: | --: | --------------: | -------------------: |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         10 |    1024 |     1024 |   1 |           pp512 |         51.19 � 1.30 |
+| qwen35moe 35B.A3B Q6_K         |  26.55 GiB |    34.66 B | CUDA       |  -1 |         10 |    1024 |     1024 |   1 |           tg128 |          6.22 � 0.19 |
+
+build: 476aa6c4b (11610)
+
+
+
+===== SUMMARY =====
+cmoe_all_ncmoe40         0.7 min  build: 476aa6c4b (11610)
+ncmoe20                  0.4 min  build: 476aa6c4b (11610)
+ncmoe10                  1.5 min  build: 476aa6c4b (11610)
+ncmoe5                   1.7 min  build: 476aa6c4b (11610)
+ncmoe10_ub4096           1.5 min  build: 476aa6c4b (11610)
+ncmoe10_ub1024           1.5 min  build: 476aa6c4b (11610)

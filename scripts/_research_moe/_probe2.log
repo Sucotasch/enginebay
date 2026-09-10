@@ -1,0 +1,13 @@
+0.00.173.940 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.174.396 W srv  llama_server: -----------------
+0.00.174.402 W srv  llama_server: CORS is set to allow all origins ('*') and no API key is set
+0.00.174.404 W srv  llama_server: this can be a security risk (cross-origin attacks)
+0.00.174.404 W srv  llama_server: more info: https://github.com/ggml-org/llama.cpp/pull/25655
+0.00.174.404 W srv  llama_server: -----------------
+0.00.178.841 I srv    load_model: loading model 'G:\Ai\lmstudio-community\Qwen3.6-35B-A3B-GGUF\Qwen3.6-35B-A3B-Q6_K.gguf'
+0.01.242.400 W common_fit_params: failed to fit params to free device memory: n_gpu_layers already set by user to 99, abort
+0.16.637.807 I cmn          init: llama threadpool init, n_threads = 5
+0.17.180.929 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 98304, kv_unified = 'true'
+0.17.404.424 I srv          init: chat template supports preserving reasoning, consider enabling it via --reasoning-preserve
+0.17.419.710 I srv  llama_server: model loaded
+0.17.419.720 I srv  llama_server: listening on http://127.0.0.1:8099

@@ -1,0 +1,32 @@
+{"label": "qw_ncmoe22_96k", "ok": false, "error": "server died rc=1"}
+{"label": "qw_ncmoe22_96k", "ok": false, "error": "server died rc=1"}
+{"label": "qw_ncmoe20_96k", "ok": false, "error": "server died rc=1"}
+{"label": "qw_ncmoe22_96k", "ok": false, "error": "server died rc=1"}
+{"label": "qw_ncmoe22_96k", "ok": true, "load_s": 17, "free_mb": 1235, "holder_mb": 14301, "tg": 28.42, "pp": 398.4, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe20_96k", "ok": true, "load_s": 17, "free_mb": 150, "holder_mb": 15431, "tg": 32.96, "pp": 431.7, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe24_96k", "ok": true, "load_s": 17, "free_mb": 2535, "holder_mb": 13044, "tg": 28.6, "pp": 352.3, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe20_kvarn", "ok": true, "load_s": 19, "free_mb": 135, "holder_mb": 15489, "tg": 28.03, "pp": 239.2, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe18_kvarn", "ok": true, "load_s": 19, "free_mb": 102, "holder_mb": 15533, "tg": 8.66, "pp": 34.6, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe22_mtp", "ok": true, "load_s": 21, "free_mb": 160, "holder_mb": 15464, "tg": 24.03, "pp": 334.0, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe24_mtp", "ok": true, "load_s": 19, "free_mb": 751, "holder_mb": 14873, "tg": 27.52, "pp": 350.7, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe26_mtp", "ok": true, "load_s": 19, "free_mb": 2014, "holder_mb": 13615, "tg": 26.21, "pp": 312.6, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "gm_ncmoe8_96k", "ok": true, "load_s": 15, "free_mb": 1635, "holder_mb": 13996, "tg": 40.33, "pp": 1231.8, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "gm_ncmoe6_96k", "ok": true, "load_s": 11, "free_mb": 728, "holder_mb": 14902, "tg": 48.15, "pp": 1527.1, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "gm_ncmoe4_96k", "ok": true, "load_s": 11, "free_mb": 162, "holder_mb": 15465, "tg": 54.3, "pp": 1826.3, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "gm_ncmoe10_96k", "ok": true, "load_s": 13, "free_mb": 2536, "holder_mb": 13092, "tg": 39.37, "pp": 1027.6, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "gm_ncmoe4_kvarn", "ok": true, "load_s": 13, "free_mb": 58, "holder_mb": 15548, "tg": 34.04, "pp": 327.0, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "gm_ncmoe6_kvarn", "ok": true, "load_s": 13, "free_mb": 623, "holder_mb": 14966, "tg": 38.25, "pp": 1270.6, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "qw_ncmoe21_96k", "ok": true, "load_s": 25, "free_mb": 643, "holder_mb": 14930, "tg": 26.01, "pp": 417.8, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe20_ub1024", "ok": true, "load_s": 17, "free_mb": 91, "holder_mb": 15515, "tg": 10.9, "pp": 62.9, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "gm_ncmoe5_96k", "ok": true, "load_s": 13, "free_mb": 238, "holder_mb": 15355, "tg": 48.86, "pp": 1634.8, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "qw_ncmoe20_rep2", "ok": true, "load_s": 27, "free_mb": 83, "holder_mb": 15471, "tg": 26.12, "pp": 413.3, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "gm_ncmoe4_rep2", "ok": true, "load_s": 13, "free_mb": 158, "holder_mb": 15425, "tg": 43.83, "pp": 1647.5, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "gm_ncmoe6_rep2", "ok": true, "load_s": 13, "free_mb": 677, "holder_mb": 14902, "tg": 46.57, "pp": 1511.2, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "qw_ncmoe21_rep", "ok": true, "load_s": 25, "free_mb": 661, "holder_mb": 14930, "tg": 30.17, "pp": 421.0, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe22_rep", "ok": true, "load_s": 17, "free_mb": 1278, "holder_mb": 14301, "tg": 28.82, "pp": 396.4, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe21_rep", "ok": true, "load_s": 17, "free_mb": 654, "holder_mb": 14930, "tg": 30.8, "pp": 421.0, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe22_rep", "ok": true, "load_s": 17, "free_mb": 1282, "holder_mb": 14301, "tg": 29.27, "pp": 396.6, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "qw_ncmoe21_t6", "ok": true, "load_s": 27, "free_mb": 653, "holder_mb": 14930, "tg": 25.16, "pp": 396.1, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "gm_ncmoe6_t6", "ok": true, "load_s": 13, "free_mb": 680, "holder_mb": 14902, "tg": 40.05, "pp": 1465.9, "tg_tokens": 220, "pp_tokens": 4181}
+{"label": "FINAL_qw_ncmoe21_preset", "ok": true, "load_s": 25, "free_mb": 649, "holder_mb": 14930, "tg": 29.59, "pp": 420.6, "tg_tokens": 220, "pp_tokens": 4176}
+{"label": "FINAL_gm_ncmoe6_preset", "ok": true, "load_s": 13, "free_mb": 662, "holder_mb": 14902, "tg": 47.48, "pp": 1529.9, "tg_tokens": 220, "pp_tokens": 4181}

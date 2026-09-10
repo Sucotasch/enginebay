@@ -1,0 +1,96 @@
+So you want to try one of those fancy huge mixture-of-experts (MoE) models locally? Well, whether you've got a gaming PC or a large multi-GPU workstation, we've
+got you covered. As long as you've downloaded enough RAM beforehand. MoE models are described in terms of their total parameters and active parameters - i.e.
+DeepSeek V3 671B A37B has 671B total parameters, but we are using only 37B parameters at a time during each forward pass through the model. In their current
+form (i.e. DeepSeek V3, GLM 4.X, Kimi K2, Qwen 3 MoE), they contain several major components (for the sake of simplicity): - Attention - Dense FFN (optional) -
+Shared expert FFN (optional) - Routed expert FFN The first three are "always active" in the sense that these model parameters are being used in every forward
+pass through the model. The last component, the routed experts, take up the vast majority of the model's total size, but we only activate a fraction of these
+parameters during each forward pass. To achieve optimal performance when splitting between the CPU and GPU, we want to assign all of the "always active"
+parameters to the GPU. Since we know that we are using these parts of the model for every token generated, it makes sense to keep them on the fastest hardware.
+We'll assume that you've downloaded a GGUF quantization of your desired model that fits within your combined RAM + VRAM, with a healthy amount of additional
+space to account for the model's k/v cache, your OS and other running programs, etc. and hop right into the tuning. A complete launch command might look
+something like: ./llama-server \ -m ./GGUF/GLM-4.7-Q4_K_M.gguf \ -c 32768 \ -ngl 999 \ -fa on \ -t 16 \ -b 4096 \ -ub 4096 \ --jinja \ --no-mmap \ -ot
+"blk\.([0-9]|[1-2][0-9]|30)\.=CUDA0,exps=CPU" But let's break it down. (llama.cpp main only) If tweaking weight offloading, disable llama.cpp's auto-fit feature
+with -fit off so you can clearly determine when your configuration runs out of memory. Perhaps in the future, this portion of the guide won't be needed at all
+once the auto-fit feature is fully optimized. We first start by assigning all parts of the model to the GPU: -ngl 999 This would normally use a huge amount of
+VRAM, so we'll additionally need to tell llama.cpp to put the routed experts on CPU: -ot "exps=CPU" Or --cpu-moe Putting that together, our launch command is:
+./llama-server \ -m <path to your model> \ -ngl 999 \ -ot "exps=CPU" \ {{additional launch args as desired}} This is the most basic configuration, with
+Attention + Dense FFN + Shared expert FFN on the GPU along with the model's k/v cache and compute buffer. The remaining Routed expert FFN are all assigned to
+the CPU. Depending on the size of your GPU, you may have a good amount of extra VRAM to spare. We can utilize that space to assign as many layers of Routed
+expert FFN to the GPU as possible. There are two ways to do this. Using -ot, we can manually assign tensors to device using a regular expression: -ot
+"blk\.([0-9]|[1-2][0-9]|30)\.=CUDA0,exps=CPU" This translates to "assign all tensors from layers 0-9, 10-29, and 30 to the 1st Nvidia GPU" and "assign all
+routed expert FFN to the CPU". The first statement takes priority, so this results in all Attention + Dense FFN + Shared expert FFN as well as the Routed expert
+FFN from layers 0-30 on the first GPU, and the remaining Routed expert FFN on the CPU. Multiple -ot expressions are officially recommended to be provided as a
+comma-separated list, rather than specifying the -ot argument multiple times, which is deprecated. Yes, this makes it harder to read, but it ensures
+compatibility with the env vars used to configure llama.cpp docker. For simplicity sake we can also specify each layer explicitly: -ot
+"blk\.(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30)\.=CUDA0,exps=CPU" Or use the built in function: --n-cpu-moe 31 Note:
+--n-cpu-moe starts counting layers starting from the highest numbered layers. This can lead to a slightly discrepancy in how many layers are offloaded because
+models that have Dense FFN layers typically have them at the start of the model (i.e. the first 3 layers of DeepSeek V3). If you have multiple GPUs, you can
+specify layers to assign to each device: -ot "blk\.([0-9])\.=CUDA0,blk\.(1[0-9])\.=CUDA1,exps=CPU" This would be "assign all tensors from layers 0-9 to the 1st
+Nvidia GPU", "assign all tensors from layers 10-19 to the 2nd Nvidia GPU", and "assign all routed expert FFN to the CPU". Inspect your VRAM usage on each model
+launch and adjust accordingly via trial and error. Due to llama.cpp's support for GPU offload prompt processing, where prompt processing is fully delegated to
+the GPU, CPU+GPU inference is very sensitive to prompt processing batch size. The physical batch size affects how much data transfer to and from the GPU is
+needed during prompt processing. Since the GPU has more computing power, it is far more powerful for prompt processing. If you have enough tokens to process
+together, llama.cpp will perform GPU offload prompt processing (referred to as op offload within llama.cpp), copying all of the CPU-assigned weights over to the
+GPU to process the prompt tokens as a single batch; this is often faster than letting the CPU handle prompt processing for the portion of the weights assigned
+to it. In llama.cpp, the default required batch size to trigger this operation is 32 tokens, while in ik_llama.cpp, this threshold is 32 * total_experts /
+active_experts tokens. We can configure the maximum number of prompt tokens to batch together by using the -b (logical batch size, default 2048) and -ub
+(physical batch size, default 512) launch arguments. The defaults are sane for pure GPU inference, however likely too small for CPU+GPU inference of large MoE
+models. A higher value will require more VRAM usage for the compute buffer, so you may need to reduce the number of routed expert layers assigned to the GPU to
+accomodate it. The physical (micro or μ) batch size cannot be larger than the logical batch size, and is the determinant of VRAM usage. Generally we set them
+both to the same value. I typically recommend -b 4096 -ub 4096. -mg can be used to set which GPU will be used as the primary GPU for offloaded prompt processing
+operations in multi-GPU configurations. This should ideally be your most powerful, highest PCIe bandwidth GPU. (llama.cpp main only) The environment variable
+GGML_OP_OFFLOAD_MIN_BATCH can be used to override the default threshold of 32 for triggering offloading prompt processing fully to the GPU. If you have low PCIe
+bandwidth to your GPU, or you have a very large amount of model weights on CPU, 32 is probably too low. For example, if you have 300gb of model weights assigned
+to CPU, and a PCIe 4.0 x16 connection to your main GPU, this would require a minimum of ~10 seconds to copy the weights to GPU to process a single batch. Your
+prompt batch likely needs to be at least several hundred for this to be "worth" doing. Jukofyork discusses how to manually determine the break-even point here
+(note that his instructions use a older proposed name for the environment variable). (ik_llama.cpp only) The default threshold for triggering GPU offload prompt
+processing in ik_llama.cpp can be configured via the commandline for the CUDA backend specifically with -cuda offload-batch-size=32. My understanding is that
+for MoE models, this overridden value is still subsequently adjusted by a factor of total_experts / active_experts. ik_llama.cpp is a fork of an older version
+of mainline llama.cpp designed around improved CPU/CUDA hybrid performance and new SOTA GGUF quant types, among other things. It is otherwise identical in
+function to llama.cpp as far as frontend support is concerned. Because the goal of this guide is to maximise the performance of your CPUmaxx build, it is well
+worth considering this fork to see if you can eek out further performance improvements, especially with prompt processing speeds. If you use multiple GPUs, the
+performance improvements can be even more significant. Note that your mileage may vary depending on your hardware, and in some cases ik_llama may be slower than
+mainline. There are some specific flags that are exclusive to ik_llama that have shown to improve performance, which we will cover here. You can otherwise use
+the same syntax between llama.cpp and ik_llama.cpp, as described above in the guide. Before trying out any optimisations, it is strongly advised to use the
+built-in llama-sweep-bench program exclusive to ik_llama to benchmark differences between different flags (substitute llama-server for llama-sweep-bench). This
+gives you a human-readable, repeatable output of performance, and will 100% determine what actually improves performance on your system. General Flags --merge-
+qkv will merge the Q, K, and V attention tensors together on the attention layers of the model. This can eek out a decent performance improvement to token
+generation with effectively no penalty if you've offloaded the attention layers to at least one of your GPUs. Please note this flag will only work if the
+quantization types of Q, K and V are the same in your quant of choice. This flag will also only work with layer split. -gr will enable graph reuse. This can
+very slightly improve performance depending on the model without any other penalties. -smgs will enable split mode graph scheduling, which is automatically
+disabled when using tensor overrides. There is a possibility that using this mode with tensor overrides will cause a crash; however, I've found that this isn't
+always true depending on your hardware setup. Enabling split mode graph scheduling can improve performance by a small but measurable amount, especially notable
+with graph split mode. -mla 3 will enable multi-head latent attention optimisations for models using the DeepSeek architecture (DeepSeek, Kimi K2). If using a
+model not based on the DS arch, there will be no effect. There are 3 variables you can assign to the command, but for the majority of hardware, -mla 3 will be
+your fastest option. -mla 2 is also worth experimenting with as it can be faster than -mla 3 with some hardware configurations. -amb 512 will determine your max
+batch size for MLA computations, with 512 being a good medium. This will also only work with models using the DeepSeek architecture. You can experiment with
+higher numbers between 512-2048; the higher the number, the theoretically faster your performance will be, at the cost of VRAM usage. -sm graph -sm graph (graph
+split) is a very significant feature exclusive to ik_llama which can greatly improve the performance of multi GPU systems. This does not apply to single GPU
+systems. To understand how graph mode split works, it's important to understand how the default layer mode split works first. -sm layer will split the tensor
+layers between your GPUs in an uneven fashion, which is further dictated by your tensor overrides. Layer mode will alternate executing inference on each GPU
+separately without any parallelization, so you're effectively only ever using the work of one GPU at a time. Graph mode split acts like a rudimentary form of
+tensor parallelism, allowing all your GPUs to crunch inferencing at the same time by splitting the tensors and work evenly across all GPUs. Note that you will
+get much better split mode graph performance with a driver that supports direct peer-to-peer access. Installing NCCL (Nvidia Collective Communication Library)
+may also give a small TG performance boost. Because of how -sm graph works, you will need to modify your -ot tensor commands to accommodate an even split
+between GPUs, otherwise it is likely you will OOM or have suboptimal performance. You will instead want to specify which layers get offloaded to the CPU only,
+while relying on -ngl 999 to offload the rest of the layers to the GPU evenly. -ot "blk\.(19|[2-9][0-9])\.ffn_(up|gate|down)_exps\.weight=CPU" This translates
+to "assign all tensors from layer 19 onwards to the CPU", therefore assigning the beginning 19 layers to your GPUs. It is similar in concept to the prior -ot
+specified in the guide, just in reverse and for the CPU only. -sm graph can greatly improve prompt processing speeds and long-context token generation
+performance, at the possible expense of the beginning generation speeds before some context has been ingested. -sas can be used to gain back some of that
+performance depending on your configuration. For users with more than one CPU (i.e. dual socket server motherboards), it's worth noting that llama.cpp currently
+does not handle NUMA elegantly. Allowing llama.cpp to use both CPU sockets and their associated RAM results in degraded performance due to cross-socket memory
+access. If your model fits within the RAM attached to a single NUMA node, confining it to that node provides the best performance. If not, though, there are
+some things we can do to reclaim some of that performance. I've provided two wrapper utility scripts to assist with NUMA configuration, assuming that you have
+numactl installed. disable-numa-balancing.sh - This script records the current NUMA-balancing state, disables NUMA balancing, then runs any command after it. On
+quit, it restores the previously recorded NUMA balancing state. The syntax is: ./disable-numa-balancing.sh <command> [args...] numactl-bind-socket.sh - This
+script binds the following command to a single CPU socket (this is useful for hardware with more than one NUMA node per socket). There are additional options to
+specify whether to bind all cores (including hyperthreads) or physical cores only, and whether to enable memory interleave. For the purposes of llama.cpp, we
+generally want to interleave if we are using more than one NUMA node, otherwise it doesn't matter. The syntax is: ./numactl-bind-socket.sh --socket <id> --mode
+<physical|all> [--interleave <on|off>] <command> [args...] For running across all NUMA nodes: ./disable-numa-balancing.sh \ numactl --interleave=all \ ./llama-
+server \ --numa distribute \ {{additional launch args as desired}} For binding to a single CPU socket (regardless of how nodes are on each socket): ./disable-
+numa-balancing.sh \ ./numactl-bind-socket.sh --socket 0 --mode all --interleave on \ ./llama-server \ --numa distribute \ {{additional launch args as desired}}
+NUMA "migration" with drop_caches + --mmap + --numa distribute: If we drop the page cache (sudo sh -c "sync; echo 1 > /proc/sys/vm/drop_caches"), and then load
+the model with --mmap, the warm-up pass upon server start will "migrate" tensors to the appropriate node based on threads. This improves TG speed significantly,
+however it degrades PP speeds when using GPU offload prompt processing. It's possible that the tensors are distributed in a way that makes them less efficient
+to copy to GPU for prompt processing. Using --direct-io vs --no-direct-io: This needs further testing as it may impact the way that tensors are distributed
+across NUMA nodes on load. Anecdotally, I had faster TG speeds (~14 T/s vs ~12 T/s) with Kimi K2.5 across both sockets with --no-direct-io.
