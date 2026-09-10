@@ -1,0 +1,6 @@
+{"label": "ik_qw_ncmoe21", "ok": true, "load_s": 18, "free_mb": 614, "holder_mb": 14962, "tg": 26.52, "pp": 159.4, "tg_tokens": 220, "pp_tokens": 4178}
+{"label": "ik_qw_ncmoe20", "ok": true, "load_s": 10, "free_mb": 110, "holder_mb": 15470, "tg": 26.61, "pp": 153.8, "tg_tokens": 220, "pp_tokens": 4178}
+{"label": "ik_gm_ncmoe6", "ok": true, "load_s": 17, "free_mb": 110, "holder_mb": 15464, "tg": 24.03, "pp": 131.4, "tg_tokens": 220, "pp_tokens": 4179}
+{"label": "ik_gm_ncmoe4", "ok": true, "load_s": 15, "free_mb": 127, "holder_mb": 15460, "tg": 27.1, "pp": 137.8, "tg_tokens": 220, "pp_tokens": 4179}
+{"label": "ik_qw_ncmoe21_t1", "ok": true, "load_s": 22, "free_mb": 549, "holder_mb": 14962, "tg": 12.14, "pp": 166.5, "tg_tokens": 220, "pp_tokens": 4178}
+{"label": "ik_qw_ncmoe21_nofmoe", "ok": false, "error": "server died rc=1"}

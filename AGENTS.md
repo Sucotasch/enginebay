@@ -49,6 +49,7 @@ Measured negatives (do not retry blindly):
 - **threads 6**: 25.2/40.1 vs 29.0/47.2 at t5 — the 6th thread starves the GPU driver. Keep `-t 5 -tb 6`.
 - **Blade-edge configs are real but not preset material**: qw ncmoe20 (33 t/s, 150 MB free) and gm ncmoe4 (54 t/s, 160 MB free) run faster until any dwm/browser spike pushes them into WDDM spill — on a desktop system they flake (rep runs dropped to 26/44 t/s).
 - **Upstream llama.cpp b10712 loses to beellama on both MoE** (qw 26.8 vs 29.5; gm 42.7 vs 47.5) — beellama v0.4.5 is THE MoE engine here.
+- **ik_llama 15dddc6 also loses on both MoE** (qw 26.5; gm 24.0-27.1; pp 130-160 t/s vs beellama's 420-1530) and uses MORE VRAM at the same ncmoe. Its fused-MoE/`-t 1` tuning targets big-EPYC+300GB-RAM rigs: `-t 1` on our 6-core dropped tg to 12.1 t/s. `--no-fmoe` crashed the server on qw. Keep ik_llama for its DENSE Qwen3.8 IQ4_KT/KS niche (trellis quants) — not for MoE.
 
 Engine note: beellama's `--n-cpu-moe N` counts from the FIRST layers (help text + logs), upstream counts from the highest — a cross-engine preset is NOT portable without flipping N.
 

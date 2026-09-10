@@ -112,6 +112,23 @@ Gemma (same base):
 | Gemma ncmoe6 | ~47 t/s | 42.7 t/s |
 beellama v0.4.5 wins both → beellama is the engine for MoE presets.
 
+### ik_llama 15dddc6 (manual build, MSVC 19.44, 2026-08-30) — `ikllama_96k.jsonl`
+| config | tg t/s | pp t/s | free MB |
+|---|---|---|---|
+| qw ncmoe21 | 26.5 | 159 | 614 |
+| qw ncmoe20 | 26.6 | 154 | 110 ← less headroom than beellama's same config |
+| gm ncmoe6 | 24.0 | 131 | 110 |
+| gm ncmoe4 | 27.1 | 138 | 127 |
+| qw ncmoe21 + `-t 1` (ubergarm's advice) | 12.1 | 167 | — EPYC-rig advice, harmful on 6-core |
+| qw ncmoe21 + `--no-fmoe` | server died rc=1 — flag incompatible with this build/arch combo |
+
+ik_llama LOSES on both MoE models vs beellama (qw 26.5 vs 29.5; gm 24.0-27.1 vs 47.5) and
+uses MORE VRAM for the same ncmoe (holder 14962 vs 14930; the -fmoe path adds buffers).
+pp is dramatically worse (130-160 vs 420-1530 t/s) — the build's CUDA paths for the new
+qwen35moe/gemma4 archs lag beellama's. Its fused-MoE optimizations target DeepSeek-class
+rigs (big EPYC + 300 GB RAM), not ours. beellama v0.4.5 = THE MoE engine on this box,
+unanimously across all three engines tested.
+
 ### FINAL WINNERS (measured, reproducible)
 - **Qwen3.6-35B-A3B (agentic MoE)**: `--n-cpu-moe 21` + q4_0 KV + `-b 2048 -ub 512 -t 5 -tb 6` → ~29-31 t/s tg, ~420 t/s pp, 650 MB VRAM headroom, 96K ctx.
 - **Gemma-4-26B-A4B (heretic)**: `--n-cpu-moe 6` + q4_0 KV + same base → ~47 t/s tg, ~1500 t/s pp, 700 MB headroom, 96K ctx.
