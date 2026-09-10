@@ -450,6 +450,98 @@ def estimate_need_mb(model_path: str) -> int:
         return 0
 
 
+# ── Model library (GGUF discovery under a user-chosen root) ──────────────
+#
+# Design (agreed): NO hardcoded paths. The root is a config key; first use
+# asks via the native directory dialog. The scan is a recursive *.gguf walk
+# cached in launcher_config.json (machine-local, gitignored); opening the
+# dialog validates cache entries by size+mtime (new files appear as
+# "unindexed", vanished files are dropped) so a fresh download shows up
+# without a manual rescan. "Rescan" rewalks the tree AND reads GGUF headers
+# (arch/name/ctx/blocks — bounded read, ~1 ms/file warm) into the cache.
+
+LIB_DEFAULT_CANDIDATES = [Path.home() / "Ai" / "Models", Path.home() / "models",
+                          Path.home() / ".cache" / "lm-studio" / "models"]
+
+# Filename token → library tag. A COMPANION draft is a separate smaller
+# "mtp-*" file next to the main model; a main model merely NAMED "*-MTP"
+# (e.g. Qwen3.8 MTP-tuned, ~14 GB) is NOT a draft — don't tag by suffix.
+_LIB_TAG_PATTERNS = [
+    ("mmproj", "projector"),
+    ("mtp-", "draft"),      # leading: companion draft file
+    ("draft", "draft"),
+]
+
+
+def library_tags(filename: str) -> list[str]:
+    low = filename.lower()
+    return [tag for tok, tag in _LIB_TAG_PATTERNS if tok in low]
+
+
+def library_moe_from_cache(meta: dict | None) -> bool:
+    """MoE flag from cached GGUF meta (size_label '26B-A4B' / expert_count)."""
+    return bool(meta and meta.get("moe"))
+
+
+def scan_library(root: Path) -> list[dict]:
+    """Recursive *.gguf walk under root (case-insensitive). Never raises."""
+    out: list[dict] = []
+    try:
+        for p in sorted(root.rglob("*.gguf")):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append({"path": str(p), "size": st.st_size, "mtime": int(st.st_mtime)})
+    except Exception:
+        pass
+    return out
+
+
+def library_root_from_cfg(cfg: dict) -> str | None:
+    """Configured root, or None when unset/missing — caller prompts."""
+    r = cfg.get("model_root")
+    if r and Path(r).is_dir():
+        return r
+    return None
+
+
+def load_library_cache(cfg: dict) -> dict:
+    lib = cfg.get("library")
+    return lib if isinstance(lib, dict) else {}
+
+
+# Fit classification shared by the dialog and (later) other consumers.
+# Mirrors _vram_guard semantics but without the modal machinery.
+def fit_class(need_mb: int, free_mb: int | None) -> str:
+    """'green' | 'yellow' | 'red' | 'none' — same thresholds as the guard."""
+    if free_mb is None or need_mb <= 0:
+        return "none"
+    if free_mb >= need_mb + VRAM_RESERVE_MB:
+        return "green"
+    if free_mb >= need_mb:
+        return "yellow"
+    return "red"
+
+
+def library_entry_need_mb(entry: dict, records: dict) -> int:
+    """Best-known VRAM need for a library entry: measured record for the
+    matching basename (max across engines/ctx — an overview figure), else
+    file size + slack. The launch-time guard still uses the exact
+    engine|model|ctx key; this is only for the list's fit dots."""
+    base = os.path.basename(entry.get("path", ""))
+    best = 0
+    for key, rec in records.items():
+        parts = key.split("|")
+        if len(parts) == 3 and parts[1] == base:
+            mb = rec.get("mb", 0) if isinstance(rec, dict) else 0
+            if mb > best:
+                best = mb
+    if best:
+        return best
+    return entry.get("size", 0) // (1024 * 1024) + VRAM_BUF_EST_MB
+
+
 # --- Dark theme stylesheet ---
 DARK_STYLESHEET = """
 QMainWindow, QWidget {
@@ -613,6 +705,213 @@ QLabel#infoLabel {
 """
 
 
+_FIT_DOT = {"green": "\U0001F7E2", "yellow": "\U0001F7E1", "red": "\U0001F534", "none": "\u26AA"}
+
+
+class ModelLibraryDialog(QDialog):
+    """Pick a GGUF from the model library: search, metadata columns, fit dot.
+
+    Data flow: cfg["library"] cache (path→{size,mtime,meta}) is validated
+    against disk on open (cheap stat); missing files drop out, new files
+    appear with a "(unindexed)" marker until Rescan reads their headers.
+    """
+
+    def __init__(self, cfg: dict, records: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Model Library")
+        self.resize(980, 560)
+        self.cfg = cfg
+        self.records = records
+        self.selected_path: str | None = None
+
+        self.root_lbl = QLabel()
+        self.search_ed = QLineEdit()
+        self.search_ed.setPlaceholderText("Filter by name...")
+        self.search_ed.textChanged.connect(self._refill)
+
+        self.list_w = QListWidget()
+        self.list_w.itemDoubleClicked.connect(self._pick)
+
+        self.meta_lbl = QLabel("")  # detail line under the list
+        self.meta_lbl.setObjectName("infoLabel")
+        self.meta_lbl.setWordWrap(True)
+
+        root_btn = QPushButton(" Change Root... ")
+        root_btn.clicked.connect(self._change_root)
+        rescan_btn = QPushButton(" Rescan ")
+        rescan_btn.clicked.connect(self._rescan)
+        ok_btn = QPushButton(" Use Model ")
+        ok_btn.setObjectName("activateBtn")
+        ok_btn.clicked.connect(self._pick)
+        cancel_btn = QPushButton(" Close ")
+        cancel_btn.clicked.connect(self.reject)
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        btns.addWidget(rescan_btn)
+        btns.addWidget(root_btn)
+        btns.addWidget(ok_btn)
+        btns.addWidget(cancel_btn)
+
+        lay = QVBoxLayout(self)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Root:"))
+        top.addWidget(self.root_lbl, 1)
+        lay.addLayout(top)
+        lay.addWidget(self.search_ed)
+        lay.addWidget(self.list_w, 1)
+        lay.addWidget(self.meta_lbl)
+        lay.addLayout(btns)
+
+        self._entries: list[dict] = []
+        self._refresh_root_label()
+        self._load_or_ask_root(first=True)
+
+    # ── data ──────────────────────────────────────────────────────
+
+    def _visible_entries(self) -> list[dict]:
+        """Cache entries still present on disk (size/mtime drift → stale meta
+        is kept but the entry stays; vanished files are dropped) + unindexed
+        on-disk files, all sorted by name."""
+        cache = load_library_cache(self.cfg)
+        by_path = {e.get("path"): e for e in scan_library(Path(self.root))}
+        out: list[dict] = []
+        for path, cached in cache.items():
+            disk = by_path.pop(path, None)
+            if disk is None:
+                continue  # file gone
+            entry = dict(disk)
+            entry["meta"] = cached.get("meta") if isinstance(cached.get("meta"), dict) else None
+            entry["stale"] = (disk.get("size") != cached.get("size")
+                              or disk.get("mtime") != cached.get("mtime"))
+            out.append(entry)
+        for path, disk in by_path.items():  # not in cache yet
+            entry = dict(disk)
+            entry["meta"] = None
+            entry["stale"] = True  # unindexed
+            out.append(entry)
+        out.sort(key=lambda e: os.path.basename(e["path"]).lower())
+        return out
+
+    def _current_snapshot(self):
+        if diag is not None:
+            snap = diag.vram_snapshot()
+            if snap.get("ok"):
+                return snap
+        return None
+
+    def _refill(self):
+        self._entries = self._visible_entries()
+        snap = self._current_snapshot()
+        free_mb = snap.get("free_mb") if snap else None
+        total_mb = snap.get("total_mb") if snap else None
+        needle = self.search_ed.text().strip().lower()
+        self.list_w.clear()
+        for e in self._entries:
+            base = os.path.basename(e["path"])
+            if needle and needle not in base.lower():
+                continue
+            need = library_entry_need_mb(e, self.records)
+            tags = library_tags(base)
+            tag_s = " ".join(f"[{t}]" for t in tags)
+            meta = e.get("meta") or {}
+            is_moe = library_moe_from_cache(meta)
+            if is_moe:
+                # MoE fit is a different question (runs via expert offload),
+                # not "does the file fit" — mark with ⚫ instead of a lie.
+                dot = "\u26AB"
+                bits = [dot, tag_s, "[MoE offload]"] if tag_s else [dot, "[MoE offload]"]
+            else:
+                dot = _FIT_DOT[fit_class(need, free_mb)]
+                bits = [dot, tag_s] if tag_s else [dot]
+            if meta.get("arch"):
+                bits.append(str(meta.get("arch")))
+            size_gb = e["size"] / (1024 ** 3)
+            bits.append(f"{size_gb:.1f} GB")
+            if e.get("stale") and not meta:
+                bits.append("(unindexed)")
+            self.list_w.addItem("  ".join(bits) + "  " + base)
+        self.list_w.setCurrentRow(0)
+        if total_mb:
+            self.meta_lbl.setText(f"{len(self._entries)} models — GPU free {free_mb} of {total_mb} MB")
+        else:
+            self.meta_lbl.setText(f"{len(self._entries)} models — GPU status unknown")
+
+    # ── actions ───────────────────────────────────────────────────
+
+    def _refresh_root_label(self):
+        r = self.cfg.get("model_root") or "(not set)"
+        self.root_lbl.setText(str(r))
+
+    def _load_or_ask_root(self, first=False):
+        r = library_root_from_cfg(self.cfg)
+        if r is None:
+            cand = next((str(c) for c in LIB_DEFAULT_CANDIDATES if c.is_dir()), None)
+            dlg = QFileDialog(self, "Choose model library root", cand or str(Path.home()))
+            dlg.setFileMode(QFileDialog.FileMode.Directory)
+            if not dlg.exec():
+                if first:
+                    self.reject()
+                return
+            chosen = dlg.selectedFiles()
+            if not chosen:
+                if first:
+                    self.reject()
+                return
+            self.cfg["model_root"] = chosen[0]
+            save_config(self.cfg)
+        self._refresh_root_label()
+        self._ensure_scan()
+
+    def _change_root(self):
+        dlg = QFileDialog(self, "Choose model library root", self.root or str(Path.home()))
+        dlg.setFileMode(QFileDialog.FileMode.Directory)
+        if not dlg.exec():
+            return
+        chosen = dlg.selectedFiles()
+        if not chosen:
+            return
+        self.cfg["model_root"] = chosen[0]
+        save_config(self.cfg)
+        self._refresh_root_label()
+        self._ensure_scan()
+        self._refill()
+
+    def _ensure_scan(self):
+        """First open: if cache empty, do the full scan now (with headers)."""
+        if not load_library_cache(self.cfg) and self.root:
+            self._rescan()
+
+    @property
+    def root(self) -> str | None:
+        return library_root_from_cfg(self.cfg)
+
+    def _rescan(self):
+        if not self.root:
+            return
+        self.meta_lbl.setText("Scanning...")
+        QApplication.processEvents()
+        entries = scan_library(Path(self.root))
+        lib: dict[str, dict] = {}
+        for e in entries:
+            meta = None
+            if diag is not None:
+                meta = diag.gguf_metadata(e["path"])
+                meta = {k: meta[k] for k in ("arch", "name", "ctx", "blocks", "quant", "moe")
+                        if meta.get(k) is not None} or None
+            lib[e["path"]] = {"size": e["size"], "mtime": e["mtime"], "meta": meta}
+        self.cfg["library"] = lib
+        save_config(self.cfg)
+        self._refill()
+
+    def _pick(self):
+        row = self.list_w.currentRow()
+        if row < 0 or row >= len(self._entries):
+            return
+        self.selected_path = self._entries[row]["path"]
+        self.accept()
+
+
 class LLMLauncher(QMainWindow):
     _log_signal = pyqtSignal(str)
     _set_status_signal = pyqtSignal(str)
@@ -774,6 +1073,10 @@ class LLMLauncher(QMainWindow):
         browse_model_btn.setObjectName("browseBtn")
         browse_model_btn.clicked.connect(self._browse_model)
         grp_model_layout.addWidget(browse_model_btn)
+
+        lib_btn = QPushButton(" Library ")
+        lib_btn.clicked.connect(self._open_library)
+        grp_model_layout.addWidget(lib_btn)
 
         main_layout.addWidget(grp_model)
 
@@ -977,6 +1280,13 @@ class LLMLauncher(QMainWindow):
         if path:
             self.model_entry.setText(path)
             save_history(path, self.history)
+
+    def _open_library(self):
+        """Model library picker: search + fit dots + GGUF metadata."""
+        dlg = ModelLibraryDialog(self.cfg, load_vram_records(), self)
+        if dlg.exec() and dlg.selected_path:
+            self.model_entry.setText(dlg.selected_path)
+            save_history(dlg.selected_path, self.history)
 
     def _browse_binary(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1507,6 +1817,24 @@ class LLMLauncher(QMainWindow):
         need_mb, measured = self._vram_need_mb(model, self._current_engine_id(), params)
         if not need_mb:
             return "ok", params
+
+        # MoE advisory: file size ≫ GPU, but the model is RUNNABLE with
+        # expert offload. Fit dots/records don't apply the usual way — warn
+        # loudly when no offload flag is present, never block.
+        if diag is not None:
+            meta = diag.gguf_metadata(model)
+            if meta.get("moe"):
+                offload = re.search(r"(--n-cpu-moe|-ot\s|exp=|exps=)", params)
+                if not offload:
+                    self._log(
+                        "MoE model: file ≫ VRAM is EXPECTED — it runs via expert "
+                        "offload. No --n-cpu-moe/-ot flag in params: llama.cpp "
+                        "will spill experts to shared memory (WDDM) and crawl.")
+                    try:
+                        self.statusBar().showMessage(
+                            "⚠ MoE without expert offload — add --n-cpu-moe or -ot exps=CPU", 15000)
+                    except Exception:
+                        pass
 
         if free_mb >= need_mb + VRAM_RESERVE_MB:
             return "ok", params  # 🟢 green

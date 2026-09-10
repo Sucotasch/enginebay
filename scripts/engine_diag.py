@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import struct
 import sys
 from pathlib import Path
@@ -641,12 +642,203 @@ def setup_job_tree() -> bool:
         return False
 
 
+# ── GGUF header reader (metadata only, bounded read) ───────────────────────
+#
+# GGUF layout: magic "GGUF", u32 version, u64 tensor_count, u64 kv_count,
+# then kv_count pairs of (u64-len key string, u32 value type, value). The
+# whole header is at the START of the file — typically < 200 KB even with a
+# chat template embedded — so we stream at most a few MB and never touch the
+# 14 GB of tensor data behind it. Same spirit as Quartermaster's
+# autogen/gguf.go metadata pass, cut down to what the model library needs.
+
+_GGUF_MAGIC = b"GGUF"
+# value type -> fixed byte size; 8 (string) and 9 (array) are handled specially
+_GGUF_SCALAR_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4,
+                      7: 1, 10: 8, 11: 8, 12: 8}
+# llama.h LLAMA_FTYPE (stable classic values; newer entries stay raw "ft<N>")
+GGUF_FTYPE_NAMES = {
+    0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 4: "Q4_1_F16", 7: "Q8_0",
+    8: "Q5_0", 9: "Q5_1", 10: "Q2_K", 11: "Q3_K_S", 12: "Q3_K_M",
+    13: "Q3_K_L", 14: "Q4_K_S", 15: "Q4_K_M", 16: "Q5_K_S", 17: "Q5_K_M",
+    18: "Q6_K", 19: "IQ2_XXS", 20: "IQ2_XS", 21: "Q2_K_S", 22: "IQ3_XS",
+    23: "IQ3_XXS", 24: "IQ1_S", 25: "IQ1_M", 26: "IQ4_NL", 27: "IQ4_XS",
+    28: "IQ2_S", 29: "IQ2_M", 30: "IQ3_S", 31: "IQ3_M",
+}
+_GGUF_MAX_HEADER_BYTES = 8 * 1024 * 1024   # hard read cap
+_GGUF_MAX_KV = 1024                        # sanity: real headers hold ~100
+_GGUF_MAX_STRING = 64 * 1024               # materialize small strings only
+_GGUF_MAX_ARRAY_ITEMS = 1_000_000
+
+
+def gguf_metadata(path) -> dict:
+    """Read GGUF header KV pairs we care about. Never raises, never reads
+    past the first few MB. Returns {} when the file is not a readable GGUF.
+
+    Result keys: ok, version, tensors, arch, name, ctx, blocks, size_label,
+    file_type (raw int), quant (human name from file_type, 'ft<N>' if new).
+    """
+    out: dict = {}
+    try:
+        with open(path, "rb") as f:
+            buf = bytearray()
+            pos = 0
+
+            def need(n: int) -> bool:
+                nonlocal pos
+                while len(buf) - pos < n:
+                    if len(buf) > _GGUF_MAX_HEADER_BYTES:
+                        return False
+                    chunk = f.read(min(1 << 20, _GGUF_MAX_HEADER_BYTES - len(buf)))
+                    if not chunk:
+                        return False
+                    buf.extend(chunk)
+                return True
+
+            def u(sz: int) -> int | None:
+                nonlocal pos
+                if not need(sz):
+                    return None
+                v = int.from_bytes(buf[pos:pos + sz], "little", signed=False)
+                pos += sz
+                return v
+
+            def s() -> str | None:
+                nonlocal pos
+                ln = u(8)
+                if ln is None or ln > _GGUF_MAX_STRING or not need(ln):
+                    return None
+                v = bytes(buf[pos:pos + ln]).decode("utf-8", "replace")
+                pos += ln
+                return v
+
+            def skip_value(vt: int) -> bool:
+                nonlocal pos
+                if vt in _GGUF_SCALAR_SIZES:
+                    if not need(_GGUF_SCALAR_SIZES[vt]):
+                        return False
+                    pos += _GGUF_SCALAR_SIZES[vt]
+                    return True
+                if vt == 8:  # string: parse length, skip bytes
+                    ln = u(8)
+                    if ln is None or ln > _GGUF_MAX_HEADER_BYTES or not need(ln):
+                        return False
+                    pos += ln
+                    return True
+                if vt == 9:  # array: element type + count, then elements
+                    et = u(4)
+                    cnt = u(8)
+                    if et is None or cnt is None or cnt > _GGUF_MAX_ARRAY_ITEMS:
+                        return False
+                    if et in _GGUF_SCALAR_SIZES:
+                        total = cnt * _GGUF_SCALAR_SIZES[et]
+                        if total > _GGUF_MAX_HEADER_BYTES or not need(total):
+                            return False
+                        pos += total
+                        return True
+                    if et == 8:  # array of strings: walk lengths
+                        for _ in range(cnt):
+                            ln = u(8)
+                            if ln is None or ln > _GGUF_MAX_HEADER_BYTES or not need(ln):
+                                return False
+                            pos += ln
+                        return True
+                    return False  # array of arrays: not in real headers
+                return False
+
+            if not need(4) or bytes(buf[:4]) != _GGUF_MAGIC:
+                return out
+            pos = 4
+            version = u(4)
+            tensors = u(8)
+            kv_count = u(8)
+            if version is None or tensors is None or kv_count is None:
+                return out
+            if kv_count > _GGUF_MAX_KV:
+                kv_count = _GGUF_MAX_KV  # cap corrupt headers
+
+            kv: dict[str, object] = {}
+            arch: str | None = None
+            # Early exit once everything the library needs is in hand — the
+            # tokenizer arrays at the header tail cost seconds on HDDs and
+            # hold nothing we display. file_type may be absent (ik-quant
+            # builds often skip it), so it never gates the exit.
+            for _ in range(kv_count):
+                key = s()
+                vt = u(4)
+                if key is None or vt is None:
+                    break
+                if vt in _GGUF_SCALAR_SIZES:
+                    if vt in (4, 10):  # u32/u64 → int
+                        sz = _GGUF_SCALAR_SIZES[vt]
+                        val = u(sz)
+                    elif vt in (5, 11):  # i32/i64 → signed
+                        if not need(_GGUF_SCALAR_SIZES[vt]):
+                            break
+                        sz = _GGUF_SCALAR_SIZES[vt]
+                        val = int.from_bytes(buf[pos:pos + sz], "little", signed=True)
+                        pos += sz
+                    else:  # tiny scalars (u8/i8/u16/i16/f32/bool/f64) → raw
+                        if not skip_value(vt):
+                            break
+                        val = None
+                elif vt == 8:
+                    val = s()
+                    if val is None:
+                        break
+                else:  # arrays and everything else: skip, keep parsing
+                    if not skip_value(vt):
+                        break
+                    val = None
+                if key and val is not None and len(kv) < 256:
+                    kv[key] = val
+                if key == "general.architecture" and isinstance(val, str):
+                    arch = val
+                if (arch is not None and "general.name" in kv
+                        and kv.get(f"{arch}.context_length") is not None):
+                    break
+
+            arch = kv.get("general.architecture")
+            out["ok"] = True
+            out["version"] = version
+            out["tensors"] = tensors
+            out["arch"] = arch if isinstance(arch, str) else None
+            out["name"] = kv.get("general.name") if isinstance(kv.get("general.name"), str) else None
+            out["size_label"] = (kv.get("general.size_label")
+                                 if isinstance(kv.get("general.size_label"), str) else None)
+            ft = kv.get("general.file_type")
+            out["file_type"] = ft if isinstance(ft, int) else None
+            out["quant"] = GGUF_FTYPE_NAMES.get(ft, f"ft{ft}") if isinstance(ft, int) else None
+            if isinstance(arch, str):
+                out["ctx"] = kv.get(f"{arch}.context_length")
+                out["blocks"] = kv.get(f"{arch}.block_count")
+            else:
+                out["ctx"] = None
+                out["blocks"] = None
+            # MoE detection WITHOUT tensor parsing: the size_label "NNB-AxB"
+            # pattern (total-active params) or an explicit expert-count KV.
+            # A MoE model fits a small GPU only with expert offload
+            # (--n-cpu-moe / -ot exps=CPU), so the launcher must know.
+            moe = False
+            if isinstance(out["size_label"], str) and re.match(
+                    r"^\d+(?:\.\d+)?[BbMm]-A\d+(?:\.\d+)?[BbMm]$", out["size_label"]):
+                moe = True
+            ec = kv.get("general.expert_count")
+            if isinstance(ec, int) and ec > 0:
+                moe = True
+            out["moe"] = moe
+            return out
+    except Exception:
+        return {}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     chk = sub.add_parser("check", help="report missing DLLs for a binary")
     chk.add_argument("exe", help="path to a Windows .exe/.dll")
     sub.add_parser("vram", help="print free/total VRAM (PDH/DXGI)")
+    gg = sub.add_parser("gguf", help="print GGUF header metadata")
+    gg.add_argument("path", help="path to a .gguf file")
     args = ap.parse_args()
 
     if args.cmd == "check":
@@ -668,6 +860,21 @@ def main() -> int:
         print(f"total={snap['total_mb']} MB used={snap['used_mb']} MB free={snap['free_mb']} MB")
         for h in snap["holders"]:
             print(f"  holder: pid={h['pid']} {h['name']} {h['mb']} MB")
+        return 0
+
+    if args.cmd == "gguf":
+        if not Path(args.path).is_file():
+            print(f"ERROR: {args.path} not found", file=sys.stderr)
+            return 1
+        m = gguf_metadata(args.path)
+        if not m.get("ok"):
+            print("ERROR: not a readable GGUF (bad magic or truncated header)",
+                  file=sys.stderr)
+            return 1
+        for k in ("arch", "name", "size_label", "quant", "ctx", "blocks",
+                  "tensors", "version", "moe"):
+            if m.get(k) is not None:
+                print(f"{k:12s} = {m[k]}")
         return 0
 
     return 0

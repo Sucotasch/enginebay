@@ -20,7 +20,8 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 | `scripts/start_llama_cpp.sh` | Alternative launcher (Git Bash) |
 | `scripts/smoke_test.py` | Verify server is responding |
 | `scripts/update_opencode_models.py` | Refresh OpenCode Free models in `~/.dsh/settings.yaml` (see skill `dsh-providers`) |
-| `scripts/engine_diag.py` | CLI: `check <exe>` (missing-DLL report via PE import walk) and `vram` (PDH/DXGI free VRAM + per-process holders). Ported from Quartermaster (MIT) |
+| `scripts/engine_diag.py` | CLI: `check <exe>` (missing-DLL report via PE import walk), `vram` (PDH/DXGI free VRAM + per-process holders), `gguf <file>` (GGUF header metadata: arch/ctx/blocks/MoE). Ported from Quartermaster (MIT) |
+| `scripts/test_job_tree.py`, `test_gguf_meta.py`, `test_gguf_moe.py`, `test_library_e2e.py` | Live/e2e tests: job-tree orphan kill, GGUF parser, MoE detect, Library dialog |
 
 ## Critical constraints
 
@@ -48,6 +49,16 @@ Ported from Quartermaster (github.com/Quartermaster-Labs/Quartermaster, MIT — 
 - ⚪ PDH/DXGI unavailable → launch without check
 
 **Need value source**: `vram_records.json`, keyed `engine|model-basename|c<ctx>`. Real measurement = PDH system-wide delta between pre-launch baseline and post-"model loaded" snapshot (works on engines that don't print VRAM lines, e.g. beellama v0.4.5). Fallback estimate = GGUF file size + 2 GB buffer, always labelled "estimate". Presets are NEVER modified by the guard.
+
+## Model Library (launcher "Library" button)
+
+`ModelLibraryDialog` in `launcher.py`: recursive `*.gguf` discovery under a **user-chosen root** (nothing hardcoded — `cfg["model_root"]` in `launcher_config.json`, gitignored; first open asks via native directory dialog, defaults checked: `~/Ai/Models`, `~/models`, `~/.cache/lm-studio/models`). Search-by-substring, per-row fit dot (🟢🟡🔴 from `vram_records.json` / size+2GB vs live PDH free), `[projector]`/`[draft]` tags from filename, arch/size columns.
+
+- **Cache contract** (chosen by user over full-scan/lazy variants): `cfg["library"]` = {path: {size, mtime, meta}}. Opening the dialog = cheap stat validation (new files appear as unindexed, vanished files drop). "Rescan" = full rewalk + GGUF header read into cache.
+- **GGUF header reader** `diag.gguf_metadata(path)`: bounded stream (≤8 MB read, early exit once arch+name+ctx known — tokenizer arrays at header tail skipped; ~1 ms warm vs 2.3 s naive full parse on HDD). Returns arch/name/size_label/ctx/blocks/quant/file_type. `general.file_type` is often ABSENT (ik-quant builds) — quant falls back to filename.
+- **MoE models (Qwen3.6-35B-A3B, Gemma-4-26B-A4B)**: detected via `size_label` regex `NNB-AxB` (total-active params) or `expert_count` KV — no tensor parsing. In the list: ⚫ dot + `[MoE offload]` tag instead of a false 🔴 (a 26.6 GB MoE file does NOT mean "doesn't fit" — it runs with `--n-cpu-moe`/`-ot exps=CPU` keeping only attention+KV+shared on GPU). At launch (`_vram_guard`), a MoE model without an offload flag in params gets a loud log+statusbar warning (never blocks): experts would spill to shared memory (WDDM) and crawl.
+- **Draft tagging rule**: a companion draft is a separate `mtp-*` file (e.g. `mtp-Qwen_Qwen3.6-35B-A3B-Q8_0.gguf`); a main model merely NAMED `*-MTP` (Qwen3.8-27B MTP-tuned, 14 GB) is NOT a draft — never tag by suffix.
+- Tests: `scripts/test_gguf_meta.py` (parser), `test_gguf_moe.py` (MoE detect on real zoo files), `test_library_e2e.py` (dialog: scan→cache→tags→dots→filter→pick; offscreen Qt).
 
 ## Job Object — children die with the parent (PORTABLE RECIPE)
 
