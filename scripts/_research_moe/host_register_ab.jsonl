@@ -1,0 +1,2 @@
+{"label": "qw_ncmoe21_96k_baseline", "ok": true, "load_s": 23, "free_mb": 665, "holder_mb": 14930, "tg": 18.57, "pp": 411.9, "tg_tokens": 220, "pp_tokens": 4176, "env_register_host": false}
+{"label": "qw_ncmoe21_96k_REGISTER_HOST=1", "ok": true, "load_s": 17, "free_mb": 666, "holder_mb": 14930, "tg": 29.59, "pp": 421.5, "tg_tokens": 220, "pp_tokens": 4176, "env_register_host": true}

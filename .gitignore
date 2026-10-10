@@ -27,4 +27,13 @@ llama.log
 vram_records.json
 
 scripts/_libtest_tmp/
+scripts/_cfgtest_tmp/
 .agents/
+
+# Repo-review raw material (downloaded third-party READMEs/issues/wikis, ~1.2 MB).
+# The findings and the fetch scripts are tracked; the dumps are not.
+scripts/_research_repos/*/
+scripts/_research_repos/_key_issues.txt
+scripts/_research_repos/_summary.json
+scripts/_research_moe/_router_test.ini
+scripts/_research_moe/_router_test.log

@@ -52,7 +52,79 @@ Measured negatives (do not retry blindly):
 - **Upstream llama.cpp b10712 loses to beellama on both MoE** (qw 26.8 vs 29.5; gm 42.7 vs 47.5) — beellama v0.4.5 is THE MoE engine here.
 - **ik_llama 15dddc6 also loses on both MoE** (qw 26.5; gm 24.0-27.1; pp 130-160 t/s vs beellama's 420-1530) and uses MORE VRAM at the same ncmoe. Its fused-MoE/`-t 1` tuning targets big-EPYC+300GB-RAM rigs: `-t 1` on our 6-core dropped tg to 12.1 t/s. `--no-fmoe` crashed the server on qw. Keep ik_llama for its DENSE Qwen3.8 IQ4_KT/KS niche (trellis quants) — not for MoE.
 
-Engine note: beellama's `--n-cpu-moe N` counts from the FIRST layers (help text + logs), upstream counts from the highest — a cross-engine preset is NOT portable without flipping N.
+Engine note (CORRECTED 2026-09-10 — the earlier claim here was WRONG): `--n-cpu-moe N` moves the **first N layers'** experts to CPU in **both** beellama and upstream. Verified in source, not just help text: `llm_ffn_block_regex()` builds `blk\.%d` for `i = 0..N-1` (`beellama.cpp/common/common.h:1242`, applied at `common/arg.cpp:3046`), and upstream b10894's own help reads "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU". There is NO opposite counting direction — the same N transfers between these two engines.
+
+## Built-in router mode (verified 2026-09-10 — relevant to any auto-swap feature)
+
+Upstream llama.cpp **and** beellama ship a router server; ik_llama has **none** of it
+(484 help lines, zero router flags). Verified by running `--help` on each local
+`llama-server.exe` and by a live launch on this box (logs `router mode` +
+`models will be automatically loaded on-demand`).
+
+| Flag | upstream | beellama | ik_llama |
+|---|---|---|---|
+| `--models-dir PATH`, `--models-preset PATH` (INI) | yes | yes | no |
+| `--models-max N` (default 4, 0 = unlimited) | yes | yes | no |
+| `--models-autoload` / `--no-models-autoload` | yes | yes | no |
+| `--sleep-idle-seconds` (unload an idle model) | yes | yes | no |
+| `LRU eviction` + request queueing at `models_max` | yes | yes | no |
+| `dedup-cache-models` preset key (hide HF-cache dupes) | yes | yes | no |
+| `/models/load`, `/models/unload`, `/models/reload`, `/models/sse` | — | yes | no |
+| preset-only `load-on-startup`, `stop-timeout` | — | yes | no |
+
+- **Live proof of swapping** (`scripts/_research_moe/test_router_swap.py`): router with
+  `--models-max 1` + an INI carrying our real MoE flags; loading a second model logged
+  `unload_lru: models_max limit reached, removing LRU name=...` then loaded the new one.
+  So on-demand swap with a concurrency cap needs **no** llama-swap on a single-backend box.
+- **INI schema** (`beellama.cpp/docs/preset.md`): option names WITHOUT leading dashes
+  (`ctx-size`, `n-cpu-moe`, `cache-type-k`), shared values in `[*]`, one section per
+  model named as its router model id, CLI args override the preset, remote presets via
+  `-hf user/preset-repo`. Never put `hf-token` in a preset.
+- Sleep = real VRAM release: entering it calls `destroy()`, waking calls `load_model()`
+  (`beellama.cpp/tools/server/server-context.cpp:1114-1130`, armed by
+  `queue_tasks.start_loop(params.sleep_idle_seconds * 1000)` at L4785).
+- `unload_lru()`/`ensure_model_ready()`/`dedup-cache-models` exist in upstream master too
+  (`tools/server/server-models.cpp:1107/1121/1488/756`); beellama's addition is the
+  `/models/*` API plus the two preset-only keys.
+- **Router caveat observed live**: it also published an unrelated
+  `unsloth/gemma-4-E2B-it-GGUF:Q4_K_XL` entry auto-discovered from the local HF cache —
+  use `dedup-cache-models`/`--models-dir` scoping to avoid surprising `/v1/models` rows.
+- Reference stack found in the wild (`thecodacus/local-ai-configs`): llama-swap in front
+  of `llama-server --models-preset models.ini --models-max 1`, with `sleep-idle-seconds =
+  600` in `[*]` and per-model `n-cpu-moe` in each section — i.e. the INI router is the
+  right substrate for a preset fleet.
+
+## MoE expert cache — third-party llama.cpp forks (evaluated 2026-09-10)
+
+**NOT in upstream** (verified: `ggml-org` master `common/arg.cpp` has `--n-cpu-moe` but
+no `moe-expert-cache`). Two forks add it:
+
+- **`GenerelSchwerz/llama.cpp` branch `moe-cache` (its DEFAULT branch).** Budgeted CUDA
+  expert cache: hot experts resident in VRAM, cold host-backed. Flags
+  `--moe-expert-cache-size N` / `--moe-expert-cache-mib MiB` / `--moe-expert-cache-layers` /
+  `--moe-expert-cache-host-pinned-mb` / `--moe-early-router` / `--experimental-logs`.
+  Claimed on an **RTX 5070 Ti 16 GB** (our class): Qwen3.6 35B 64.08 → **146.77** t/s,
+  Gemma 4 56.09 → **151.24** t/s, with *lower* peak VRAM. Has a dedicated wiki page for
+  **Windows WDDM partial pinning**: use `--moe-expert-cache-host-pinned-mb 0` (auto
+  partial pinning — WDDM refuses a full pin of the expert source) and keep ~900 MB VRAM
+  free. **No releases at all** (only tags) — needs a source build like ik_llama.
+  Known bad: `#151` `--moe-expert-profile` crashes on the first request on
+  **Qwen3.6-35B-A3B** (our arch), `#112` illegal memory access in `prepare_residency`,
+  `#104` corrupted output with the cache on Windows 11, `#90` multi-GPU placement.
+- **`thecodacus/llama.cpp` branch `perf`.** Different design: a one-time routing profile
+  (`llama-moe-trace` → CSV, then `--moe-cache-profile X.csv --moe-cache-slots N`).
+  Supports `qwen35moe` (ours) explicitly; measured on RTX 3060 12 GB: Qwen3.6-35B-A3B
+  42.3 → 51.3 t/s (+21%), **+78%** with async CPU splits, **+66%** with draft-mtp.
+  Works inside `--models-preset` INI sections. But **issues are disabled** (empty open and
+  closed lists) and it has **zero releases** — no public validation.
+- Its "Fable prefill" claim (`GGML_CUDA_REGISTER_HOST=1`, ~+64% prefill) is **already
+  available upstream and in our beellama** — and was **live-tested here as NEUTRAL/NEGATIVE**:
+  ABBA on our Qwen MoE preset gave tg 29.38 → 28.02 t/s (−4.6%) and pp 421.0 → 419.8 (−0.3%)
+  (`scripts/_research_moe/bench_host_register_abba.py`, `host_register_abba.jsonl`).
+  Do not enable it; do not re-test without changing `--load-mode`.
+
+Full consolidated assessment of all six repos (llama-swap, local-ai-configs, both forks,
+Edge0, Strata) with evidence and effort estimates: `scripts/_research_repos/REVIEW.md`.
 
 ## VRAM guard + DLL diagnostics (launcher)
 

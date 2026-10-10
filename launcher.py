@@ -1861,7 +1861,10 @@ class LLMLauncher(QMainWindow):
             self._log(f"Launch error: {e}")
             return
 
+        # Merge into the existing config, never replace it: model_root and the
+        # library cache live in the same file and must survive every launch.
         save_config({
+            **self.cfg,
             "model": model, "binary": binary, "host": host, "port": port,
             "params": params, "engine_id": self._current_engine_id()
         })
