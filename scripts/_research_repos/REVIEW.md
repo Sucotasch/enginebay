@@ -84,12 +84,73 @@ a time — which is exactly the honest fit for this GPU.
 |---|---|---|---|---|
 | 1 | `mostlygeek/llama-swap` | Go swap-router/proxy in front of any OpenAI/Anthropic server; 5912★, MIT | **BORROW-IDEAS** (config/UX contracts); not needed as a dependency | S–M |
 | 2 | `thecodacus/local-ai-configs` | 10★ reference stack: llama-swap → llama.cpp router + `models.ini` presets | **BORROW-IDEAS** (best single reference for our target architecture) | S |
-| 3 | `GenerelSchwerz/llama.cpp` (`moe-cache` branch) | llama.cpp fork adding a **budgeted CUDA expert cache**: hot experts resident in VRAM, cold in host RAM | **INTEGRATE (evaluate as 4th engine)** — biggest measured win, needs manual build | M–L |
+| 3 | `GenerelSchwerz/llama.cpp` (`moe-cache` branch) | llama.cpp fork adding a **budgeted CUDA expert cache**: hot experts resident in VRAM, cold in host RAM | **SUPERSEDED by upstream** (PR #29887, merged 2026-10-07) — test upstream first, fork = fallback only | **S** (was M–L) |
 | 4 | `thecodacus/llama.cpp` (`perf` branch) | llama.cpp fork with its own MoE expert cache + host-register/prefetch env vars | **BORROW-IDEAS / MONITOR** — issues disabled, no releases; key env var already upstream | S to test, M to adopt |
 | 5 | `Edge0-AI/Edge0` | Apple-MLX-first streaming-MoE framework + model release; Windows layer is a thin llama.cpp fork | **MONITOR** | S (ideas) |
 | 6 | `Niko1221/Strata` | Standalone C++/CUDA engine for one model family (Qwen3.8-Flash-Next), 20k★ | **BORROW-IDEAS** (supervisor/API contracts) — engine itself **SKIP** | S–M |
 
 ## 2. GenerelSchwerz/llama.cpp — the MoE expert cache (highest-value finding)
+
+**§2.0 UPDATE 2026-10-10 (web check before building — this changes the recommendation).**
+The expert cache **is now in upstream llama.cpp**; the fork build is NOT needed:
+
+- **PR #29887** *"llama: add a GPU cache for MoE experts kept in host memory"* by
+  `am17an` (a ggml maintainer), **merged 2026-10-07** — an explicit **port of the
+  qvac-fabric MoE cache** (`tetherto/qvac-fabric-llm.cpp`, Tether's edge-inference
+  project, 133★). Mechanism: LRU cache of experts — MUL_MAT_ID ops on host experts
+  run on the GPU, only cache misses get uploaded; **small batches only (≤ 32
+  tokens**, i.e. the decode path — large batches keep the regular offload path);
+  layers with different expert layouts get separate banks; guidance: **~10% of the
+  total expert size is a good `--moe-cache-mib` value**.
+- **PR #30112** *multi-GPU support*, merged 2026-10-08 (same author).
+- **Nightly `b11541` (published 2026-10-10, today) contains it** — verified via the
+  GitHub API against the tag: `src/llama-moe-cache.cpp` (25 546 bytes) and
+  `--moe-cache-mib` in `common/arg.cpp`. Windows CUDA asset naming is unchanged
+  (`llama-b11541-bin-win-cuda-13.4-x64.zip` + `cudart-…`) and our launcher's
+  classifier (`_classify_llama_asset` / `_extract_cuda_version`) parses it fine —
+  Check Updates → download is the whole integration cost.
+- **Upstream's own benchmark** (PR #29887, Qwen3.8-Flash-Next Q4_0, 93.7 GiB model
+  with 65.4 GiB of experts, EPYC 7742, SPEED-Bench, no MTP):
+
+  | GPU | config | experts in VRAM | tg t/s | speed-up | hit rate |
+  |---|---|---|---:|---:|---:|
+  | RTX 4090 | master `--fit` | 16.5 + 0.0 GB | 25.0 | 1.00× | — |
+  | RTX 4090 | `--fit --moe-cache-mib 6544` | 10.4 + 6.4 GB | 39.4 | **1.57×** | 72% |
+  | RTX 4090 | `-cmoe --moe-cache-mib 11000` | 0 + 10.7 GB | 40.7 | **1.62×** | 77% |
+  | RTX 5090 | `-cmoe --moe-cache-mib 19000` | 0 + 18.6 GB | 67.8 | **2.20×** | 89% |
+
+- **Independent field report** (dotnetperls.com, 2026-10-08): RTX 3060,
+  **gemma-4-26B q4_0: 48 → 68 tok/s (+29%) with `--moe-cache-mib 7200`**; tips that
+  match our preset discipline — the cache needs free VRAM (quantize KV, we already
+  run q4_0 KV) and disabling MTP helped (consistent with our MTP-on-A3B negative).
+- **No regressions reported so far** — the feature is 3 days old; the issue tracker
+  shows only follow-ups: per-device comma values (#30205, #30163), GPU-resident LRU
+  as a future improvement (#29949), pipeline parallelism (#29963). An earlier
+  attempt of the same idea existed as #24524 (closed).
+- **FreeToken** (dedicated MoE serving runtime, Linux/CUDA-focused) measured at
+  **parity** with the moe-cache approach on an RTX 5070 Ti 16 GB by the fork's own
+  wiki (short: 150.9 vs 148.6 t/s; filled 64 K: 117.9 vs 121.4) — so there is no
+  "better engine to switch to", the llama.cpp path is already at the frontier, and
+  FreeToken does not serve our Windows box anyway.
+- **beellama does NOT have the cache** (Anbeeld/beellama.cpp last pushed
+  2026-10-07, before the merge) — so the A/B must run on the upstream engine. Our
+  earlier "upstream loses to beellama on MoE by ~10%" (b10712 era) is dwarfed by
+  the cache's expected +29…+77 %.
+
+**Revised verdict:** the fork is demoted from "build it" to "reference material".
+Its remaining extras (early-router, host-pinning, generic hybrid execution,
+profiling) are exactly the parts with open crashes (#151, #112) and were NOT
+taken upstream. Test upstream `--moe-cache-mib` first — effort **S** instead of
+M–L, zero new code (the launcher already downloads nightly builds).
+
+**What this means for our two MoE presets** (16 GB VRAM, 64 GB RAM): raise
+`--n-cpu-moe` to free VRAM and hand it to the cache — e.g. Qwen3.6-35B-A3B from
+`ncmoe 21` (29.6 t/s, 650 MB free) to `ncmoe 40` + `--moe-cache-mib ~9000`
+(modeled on the PR's best `-cmoe + 10.7 GB cache` row), Gemma from `ncmoe 6` to
+`ncmoe 30` + `--moe-cache-mib ~9500`. Decode is the target path (batches ≤ 32
+tokens); prefill keeps the regular offload path.
+
+**The original fork assessment follows for reference.**
 
 **What it is** (README + `docs/fork-features.md` + wiki): a maintained llama.cpp fork
 whose `moe-cache` branch is the **default branch**, adding an opt-in, CUDA-only
@@ -328,13 +389,16 @@ Borrowable, with effort:
 
 ## 8. Prioritised action list
 
-**P0 — verify the expert cache on this box (the only item with a step-change payoff).**
-Build GenerelSchwerz `moe-cache` (manual MSVC+CUDA build like ik_llama, then register
-it as a 4th engine) or obtain a matched binary; then A/B the existing
-"Qwen3.6-35B-A3B (Bee MoE)" preset with `--moe-expert-cache-size` + `--n-cpu-moe 20`
-and `--moe-expert-cache-host-pinned-mb 0` (Windows/WDDM guidance), watching for the
-`moe-cache`, `moe-cache-host` and `moe-grouped-decode` log lines and requiring
-coherent output before trusting any rate. Effort M–L, gated on a successful build.
+**P0 — verify the MoE cache on this box. REVISED 2026-10-10: effort S, no build.**
+The cache is **upstream** (PR #29887, merged 2026-10-07, port of qvac-fabric;
+multi-GPU in #30112) and nightly **b11541** (2026-10-10) ships it for Windows CUDA.
+Do NOT build the GenerelSchwerz fork — its extras are the buggy part and were not
+upstreamed. Plan: Check Updates → download b11541 → A/B our two MoE presets on the
+upstream engine with `--n-cpu-moe ALL` + `--moe-cache-mib ~9000-10000` (≈10% of
+expert size per the PR guidance, sized to leave ~900 MB free), watching tg only
+(cache serves decode batches ≤ 32 tokens) and requiring coherent output. Baselines
+to beat: qw 29.6 t/s, gm 47.5 t/s. If the gain reproduces, add new presets (never
+modify the existing ones) and record footprints in `vram_records.json`.
 
 **P1 — test the free prefill win already in our binaries. RESULT: NEGATIVE, closed.**
 `GGML_CUDA_REGISTER_HOST=1` was measured live on the current beellama MoE preset

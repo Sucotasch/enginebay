@@ -94,37 +94,67 @@ Upstream llama.cpp **and** beellama ship a router server; ik_llama has **none** 
   600` in `[*]` and per-model `n-cpu-moe` in each section — i.e. the INI router is the
   right substrate for a preset fleet.
 
-## MoE expert cache — third-party llama.cpp forks (evaluated 2026-09-10)
+## MoE expert cache — UPSTREAMED 2026-10-07, no fork needed (re-checked 2026-10-10)
 
-**NOT in upstream** (verified: `ggml-org` master `common/arg.cpp` has `--n-cpu-moe` but
-no `moe-expert-cache`). Two forks add it:
+**The expert cache is in upstream llama.cpp** — PR #29887 *"llama: add a GPU cache for
+MoE experts kept in host memory"* (author `am17an`, a ggml maintainer; an explicit
+**port of the qvac-fabric MoE cache**, `tetherto/qvac-fabric-llm.cpp`, Tether's
+edge-inference project), merged **2026-10-07**; multi-GPU in PR #30112, merged
+2026-10-08. Verified against the **b11541** tag (nightly 2026-10-10):
+`src/llama-moe-cache.cpp` (25 546 bytes) and the flag are present.
 
-- **`GenerelSchwerz/llama.cpp` branch `moe-cache` (its DEFAULT branch).** Budgeted CUDA
-  expert cache: hot experts resident in VRAM, cold host-backed. Flags
-  `--moe-expert-cache-size N` / `--moe-expert-cache-mib MiB` / `--moe-expert-cache-layers` /
-  `--moe-expert-cache-host-pinned-mb` / `--moe-early-router` / `--experimental-logs`.
-  Claimed on an **RTX 5070 Ti 16 GB** (our class): Qwen3.6 35B 64.08 → **146.77** t/s,
-  Gemma 4 56.09 → **151.24** t/s, with *lower* peak VRAM. Has a dedicated wiki page for
-  **Windows WDDM partial pinning**: use `--moe-expert-cache-host-pinned-mb 0` (auto
-  partial pinning — WDDM refuses a full pin of the expert source) and keep ~900 MB VRAM
-  free. **No releases at all** (only tags) — needs a source build like ik_llama.
-  Known bad: `#151` `--moe-expert-profile` crashes on the first request on
-  **Qwen3.6-35B-A3B** (our arch), `#112` illegal memory access in `prepare_residency`,
-  `#104` corrupted output with the cache on Windows 11, `#90` multi-GPU placement.
-- **`thecodacus/llama.cpp` branch `perf`.** Different design: a one-time routing profile
-  (`llama-moe-trace` → CSV, then `--moe-cache-profile X.csv --moe-cache-slots N`).
-  Supports `qwen35moe` (ours) explicitly; measured on RTX 3060 12 GB: Qwen3.6-35B-A3B
-  42.3 → 51.3 t/s (+21%), **+78%** with async CPU splits, **+66%** with draft-mtp.
-  Works inside `--models-preset` INI sections. But **issues are disabled** (empty open and
-  closed lists) and it has **zero releases** — no public validation.
-- Its "Fable prefill" claim (`GGML_CUDA_REGISTER_HOST=1`, ~+64% prefill) is **already
-  available upstream and in our beellama** — and was **live-tested here as NEUTRAL/NEGATIVE**:
-  ABBA on our Qwen MoE preset gave tg 29.38 → 28.02 t/s (−4.6%) and pp 421.0 → 419.8 (−0.3%)
-  (`scripts/_research_moe/bench_host_register_abba.py`, `host_register_abba.jsonl`).
-  Do not enable it; do not re-test without changing `--load-mode`.
+**Usage:** `--moe-cache-mib N` — GPU cache (MiB) for MoE experts kept in host memory
+via `-cmoe`/`--n-cpu-moe`. LRU eviction; MUL_MAT_ID on host experts runs on the GPU,
+only misses upload; **decode batches only (≤ 32 tokens — pp keeps the regular
+path)**; separate banks per expert layout; **~10% of total expert size is a good N**.
+Env: `LLAMA_ARG_MOE_CACHE_MIB`. With `--fit` the cache is counted against the budget
+(we don't use --fit; explicit `-cmoe`/`--n-cpu-moe` + the flag works per the PR's own
+best rows).
 
-Full consolidated assessment of all six repos (llama-swap, local-ai-configs, both forks,
-Edge0, Strata) with evidence and effort estimates: `scripts/_research_repos/REVIEW.md`.
+**Measured claims:**
+- Upstream PR (Qwen3.8-Flash-Next Q4_0, EPYC 7742): RTX 4090 25.0 → 39.4 t/s
+  (1.57×, `--fit` + 6.4 GB cache), 40.7 (1.62×, `-cmoe` + 10.7 GB cache);
+  RTX 5090 30.8 → 67.8 (2.20×, `-cmoe` + 18.6 GB). Hit rates 72–89%.
+- Independent blog (dotnetperls, 2026-10-08, RTX 3060): **gemma-4-26B q4_0
+  48 → 68 t/s (+29%) at `--moe-cache-mib 7200`** — tips: free VRAM matters
+  (quantized KV q4_0 — we already do), disabling MTP helped (matches our
+  MTP-on-A3B negative).
+- No regressions reported yet (3 days old); tracker shows only per-device-comma
+  feature requests (#30205/#30163) and future work (#29949 GPU-resident LRU,
+  #29963 pipeline parallelism).
+
+**Consequences for EngineBay:**
+- Test on the **upstream engine** (Check Updates → b11541 or newer). beellama does
+  NOT have the cache yet (last push 2026-10-07, pre-merge) — until it rebases,
+  upstream becomes the MoE engine if the gain reproduces.
+- Our 16 GB plan per model: raise `--n-cpu-moe` to (nearly) all layers and give the
+  freed VRAM to the cache — qw: `ncmoe 40` + `--moe-cache-mib ~9000`; gm: `ncmoe 30`
+  + `--moe-cache-mib ~9500` — keep ~900 MB headroom (our VRAM-edge law still
+  applies: the cache is a VRAM consumer). Baselines to beat: qw 29.6 t/s, gm 47.5.
+- The asset naming is unchanged (`llama-b11541-bin-win-cuda-13.4-x64.zip` +
+  `cudart-…`); the launcher classifier parses it — no code change needed to fetch.
+
+**The three third-party forks, for reference (all pre-date/pre-empt the upstream
+port; the core idea won and is upstream now):**
+- `GenerelSchwerz/llama.cpp` (`moe-cache` default branch, 138★): richer variant
+  (`--moe-expert-cache-size/-mib/-layers/-host-pinned-mb`, early-router, grouped
+  decode). Its wiki claims Qwen3.6 35B 64→147 t/s on a 5070 Ti 16 GB, but its
+  extras have open crashes (#151 `--moe-expert-profile` on our exact arch,
+  #112 illegal access in `prepare_residency`) and it has **no releases** — build
+  only if upstream's gain disappoints. Its `beellama/main` branch has KVarN but
+  NOT the expert cache (separate lineages per #113).
+- `thecodacus/llama.cpp` (`perf`): profile-based cache (`llama-moe-trace` → CSV →
+  `--moe-cache-profile/--moe-cache-slots`), supports `qwen35moe`; issues disabled,
+  zero releases — no public validation.
+- Its "Fable prefill" claim (`GGML_CUDA_REGISTER_HOST=1`, +64% pp): already
+  upstream, **live-tested here as NEGATIVE** (ABBA: tg −4.6%, pp −0.3%,
+  `scripts/_research_moe/host_register_abba.jsonl`). Do not enable.
+- `FreeToken` (dedicated MoE runtime, Linux/CUDA): measured at parity with the
+  moe-cache approach on a 5070 Ti by the fork's own wiki — not a better engine,
+  and not for Windows.
+
+Full consolidated assessment: `scripts/_research_repos/REVIEW.md` (§2.0 has the
+upstream-merge update; §8/P0 is the revised no-build test plan).
 
 ## VRAM guard + DLL diagnostics (launcher)
 
