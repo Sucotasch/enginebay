@@ -1,0 +1,4 @@
+{"label": "qw_cmoe_c11500", "free_mb": 1043, "ok": true, "warmup": 27.82, "steady": 40.81, "runs": [42.12, 39.49], "pp": 250.8}
+{"label": "gm_cmoe_c10500", "free_mb": 1006, "ok": true, "warmup": 45.97, "steady": 72.2, "runs": [74.71, 69.69], "pp": 1100.9}
+{"label": "qw_fit_c8000", "free_mb": 198, "ok": true, "warmup": 3.67, "steady": 3.65, "runs": [3.73, 3.57], "pp": 62.5}
+{"label": "gm_fit_c8000", "free_mb": 211, "ok": true, "warmup": 12.91, "steady": 13.48, "runs": [13.67, 13.29], "pp": 76.3}

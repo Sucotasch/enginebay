@@ -141,3 +141,50 @@ unanimously across all three engines tested.
 - DS `--n-cpu-moe counts from highest layers` (upstream): beellama counts from FIRST layers (verified in help text + probe logs: n_slots/n_gpu_layers behaviour identical, speed cliff symmetric).
 - QML's q4_0-KV-75%-savings: confirmed directionally (our 96K q4_0 KV fits where f16 wouldn't).
 - SMELT's "80 t/s on RTX 4070 Qwen3-30B-A3B Q4_K_M": their file is 18.6 GB vs our Q6_K 26.55 GB — different quant, not comparable; our Q6_K Qwen result (29.5) vs their Q4 (80 t/s claimed) is quant+claim, unmeasured by us.
+
+## MoE EXPERT CACHE CAMPAIGN (2026-10-10, upstream b11541-cuda-13.4, port 8099)
+
+Upstream merged PR #29887 (2026-10-07, port of the qvac-fabric MoE cache by ggml
+maintainer am17an; multi-GPU in #30112 on 2026-10-08): `--moe-cache-mib N` — an
+LRU cache of host-resident experts in VRAM; decode-batch MUL_MAT_ID runs on the
+GPU, only misses upload over PCIe. Decode batches only (≤ 32 tokens); large
+batches (prefill) keep the regular offload path.
+
+### Measured (scripts: bench_moe_cache.py, bench_moe_cache_steady.py, bench_moe_hybrid.py; logs: moe_cache_b11541.jsonl, moe_cache_steady.jsonl, moe_cache_hybrid.jsonl, dense_b11541.jsonl)
+
+All experts in RAM (`-cmoe`) + cache, 96K, q4_0 KV, -t 5 -tb 6, b 2048, ub 512:
+
+| Model | cache MiB | cold tg (220-tok shot) | **steady tg** (warm LRU, 2×250-tok) | pp | free MB |
+|---|---:|---:|---:|---:|---:|
+| Qwen3.6-35B-A3B Q6_K | 9000 | 25.7 | — | 216 | 3481 |
+| Qwen3.6-35B-A3B Q6_K | 10500 | 28.8 | 36.0 | 228 | 1988 |
+| Qwen3.6-35B-A3B Q6_K | 11500 | 27.8 | **40.8** (42.1/39.5) | 251 | 1043 |
+| Gemma-4-26B-A4B Q4_K_M | 8500 | 44.4 | — | 707 | 2973 |
+| Gemma-4-26B-A4B Q4_K_M | 9500 | 46.9 | 65.8 | 836 | 1979 |
+| Gemma-4-26B-A4B Q4_K_M | 10500 | 46.0 | **72.2** (74.7/69.7) | 1101 | 1006 |
+
+vs the beellama winners above: **qw +38% / gm +52% decode**, but pp drops
+−40% / −28%. Cache benefit scales with size to the VRAM edge; steady state
+needs a warmed LRU (first ~200 tokens run 25–47 t/s — cold-start is real).
+
+### Winners → new presets (ADD-only)
+- **Qwen3.6-35B-A3B (MoE cache)**: base + `-cmoe --moe-cache-mib 11500` → 40.8 t/s steady tg (upstream engine ≥ b11541 only; beellama rejects the flag and dies).
+- **Gemma-4-26B-A4B (MoE cache)**: base + `-cmoe --moe-cache-mib 10500` → 72.2 t/s steady tg.
+- Chat/agentic presets: the cache pair. Prompt-heavy work: keep (Bee MoE) — 420/1530 pp vs 251/1101.
+
+### Measured negatives (this campaign, do not retry)
+- **`--fit` + `--moe-cache-mib`**: fit under-reserves for the cache (free ~200 MB
+  after load) → WDDM spill → **qw 3.65 t/s**, gm 13.5 t/s. The VRAM-edge law hits
+  the auto-planner too; with the cache as a VRAM consumer, place experts
+  explicitly and size the cache by hand.
+- **Cache beyond 11500/10500**: would breach the ~600 MB reserve (free 1043/1006
+  already) — one dwm spike from spill.
+- **Cold-start benchmarking**: single 220-token shots under-report the cache by
+  ~30–45% (qw 27.8 cold vs 40.8 steady) — always warm up before measuring.
+- **Dense Qwen3.8-27B on b11541**: the new GDN warp kernel (#30087) changed
+  nothing here — IQ4_XS-pure + the upstream preset params: 12.08 t/s (b11541) vs
+  12.29 t/s (beellama v0.4.7); that preset is CPU-FFN-bound
+  (--override-tensor 8 ffn layers = ~1.1 GB per token on the i7-5820K). ik_llama
+  IQ4_KT 35.9 t/s stays the dense reference. `--cpu-mtp`: NOT merged upstream
+  (#29618/19/20 all closed). `--cache-ram` = RAM prompt-state cache (PR #16391),
+  not a decode feature.

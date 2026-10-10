@@ -1,0 +1,2 @@
+{"label": "dense_IQ4XS_beellama_v047", "ok": true, "load_s": 17, "free_mb": 1014, "holder_mb": 14561, "tg": 12.29, "pp": 821.3, "tg_tokens": 220, "pp_tokens": 4218, "engine": "beellama_v047"}
+{"label": "dense_IQ4XS_b11541", "ok": true, "load_s": 11, "free_mb": 943, "holder_mb": 14595, "tg": 12.08, "pp": 808.3, "tg_tokens": 185, "pp_tokens": 4218, "engine": "b11541"}

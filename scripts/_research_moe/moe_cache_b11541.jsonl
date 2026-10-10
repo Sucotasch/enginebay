@@ -1,0 +1,6 @@
+{"label": "qw_ncmoe21_nocache", "ok": true, "load_s": 21, "free_mb": 430, "holder_mb": 14950, "tg": 24.29, "pp": 422.0, "tg_tokens": 220, "pp_tokens": 4176, "engine": "b11541-cuda-13.4"}
+{"label": "qw_cmoe_cache9000", "ok": true, "load_s": 29, "free_mb": 3481, "holder_mb": 12007, "tg": 25.73, "pp": 216.2, "tg_tokens": 220, "pp_tokens": 4176, "engine": "b11541-cuda-13.4"}
+{"label": "qw_cmoe_cache10500", "ok": true, "load_s": 33, "free_mb": 1988, "holder_mb": 13507, "tg": 28.79, "pp": 228.1, "tg_tokens": 220, "pp_tokens": 4176, "engine": "b11541-cuda-13.4"}
+{"label": "gm_ncmoe6_nocache", "ok": true, "load_s": 17, "free_mb": 641, "holder_mb": 14914, "tg": 38.41, "pp": 1427.9, "tg_tokens": 220, "pp_tokens": 4181, "engine": "b11541-cuda-13.4"}
+{"label": "gm_cmoe_cache8500", "ok": true, "load_s": 17, "free_mb": 2973, "holder_mb": 12547, "tg": 44.41, "pp": 707.0, "tg_tokens": 220, "pp_tokens": 4181, "engine": "b11541-cuda-13.4"}
+{"label": "gm_cmoe_cache9500", "ok": true, "load_s": 15, "free_mb": 1979, "holder_mb": 13547, "tg": 46.93, "pp": 836.1, "tg_tokens": 220, "pp_tokens": 4181, "engine": "b11541-cuda-13.4"}

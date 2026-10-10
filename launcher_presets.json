@@ -58,5 +58,15 @@
     "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified --n-cpu-moe 6 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
     "port": "8888"
+  },
+  "Qwen3.6-35B-A3B (MoE cache)": {
+    "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified -cmoe --moe-cache-mib 11500 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
+    "host": "127.0.0.1",
+    "port": "8888"
+  },
+  "Gemma-4-26B-A4B (MoE cache)": {
+    "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified -cmoe --moe-cache-mib 10500 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
+    "host": "127.0.0.1",
+    "port": "8888"
   }
 }

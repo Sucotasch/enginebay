@@ -1,0 +1,2 @@
+{"label": "qw_cache10500", "warmup_tg": 25.7, "steady_tg": 35.96, "runs": [35.99, 35.92], "free_mb": 1998, "ok": true}
+{"label": "gm_cache9500", "warmup_tg": 44.48, "steady_tg": 65.81, "runs": [71.48, 60.14], "free_mb": 2002, "ok": true}

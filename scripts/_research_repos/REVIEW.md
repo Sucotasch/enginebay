@@ -389,16 +389,23 @@ Borrowable, with effort:
 
 ## 8. Prioritised action list
 
-**P0 — verify the MoE cache on this box. REVISED 2026-10-10: effort S, no build.**
-The cache is **upstream** (PR #29887, merged 2026-10-07, port of qvac-fabric;
-multi-GPU in #30112) and nightly **b11541** (2026-10-10) ships it for Windows CUDA.
-Do NOT build the GenerelSchwerz fork — its extras are the buggy part and were not
-upstreamed. Plan: Check Updates → download b11541 → A/B our two MoE presets on the
-upstream engine with `--n-cpu-moe ALL` + `--moe-cache-mib ~9000-10000` (≈10% of
-expert size per the PR guidance, sized to leave ~900 MB free), watching tg only
-(cache serves decode batches ≤ 32 tokens) and requiring coherent output. Baselines
-to beat: qw 29.6 t/s, gm 47.5 t/s. If the gain reproduces, add new presets (never
-modify the existing ones) and record footprints in `vram_records.json`.
+**P0 — verify the MoE cache on this box. DONE 2026-10-10 — RESULT: +38%/+52% decode, presets shipped.**
+No build was needed (upstream PR #29887; nightly b11541 downloaded via the standard
+release assets into `llama.cpp/versions/b11541-cuda-13.4/`). Measured ladder
+(`scripts/_research_moe/bench_moe_cache*.py`, `bench_moe_hybrid.py`): with `-cmoe` +
+`--moe-cache-mib 11500` (qw) / `10500` (gm), warm-cache steady decode hit
+**40.8 t/s (Qwen3.6-35B-A3B, +38% vs 29.6)** and **72.2 t/s (Gemma-4-26B-A4B, +52%
+vs 47.5)**, at the cost of −40%/−28% prefill (large batches keep the CPU path).
+Two new presets added (ADD-only): "Qwen3.6-35B-A3B (MoE cache)" and
+"Gemma-4-26B-A4B (MoE cache)" — upstream engine ≥ b11541 required.
+Measured negatives: `--fit` + cache oversubscribes on 16 GB (free ~200 MB → WDDM
+spill → 3.65 t/s — do not combine); cold-start under-reports the cache by ~30–45%
+(always warm up before measuring); cache ceiling at 11500/10500 (free ~1000 MB —
+going further breaches the 600 MB reserve).
+Dense follow-up (b11541 vs beellama v0.4.7, same IQ4_XS-pure model + preset params):
+12.08 vs 12.29 t/s — the new GDN kernel changed nothing here; ik_llama IQ4_KT
+(35.9 t/s) keeps the dense crown. `--cpu-mtp` NOT merged (#29618/19/20 closed).
+Full data: `scripts/_research_moe/RESEARCH.md` §"MoE EXPERT CACHE CAMPAIGN".
 
 **P1 — test the free prefill win already in our binaries. RESULT: NEGATIVE, closed.**
 `GGML_CUDA_REGISTER_HOST=1` was measured live on the current beellama MoE preset

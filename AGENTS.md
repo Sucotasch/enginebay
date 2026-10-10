@@ -14,7 +14,7 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 | `Launcher.bat` | Open PyQt6 GUI (`launcher.py`) |
 | `launch-hermes-llama.bat` | Start server + Hermes with local provider |
 | `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection**, **VRAM guard + DLL diagnostics**, **Model Library** |
-| `launcher_presets.json` | Saved configs: 10 dense (Qwen3.8-27B/Agentic/Gemma4/KVarN/MTP) + "Qwen3.6-35B-A3B (Bee MoE)" + "Gemma-4-26B-A4B (Bee MoE)" (port 8888, `--n-cpu-moe 21/6`) |
+| `launcher_presets.json` | Saved configs: 10 dense (Qwen3.8-27B/Agentic/Gemma4/KVarN/MTP) + "Qwen3.6-35B-A3B (Bee MoE)" + "Gemma-4-26B-A4B (Bee MoE)" (port 8888, `--n-cpu-moe 21/6`) + "Qwen3.6-35B-A3B (MoE cache)" + "Gemma-4-26B-A4B (MoE cache)" (port 8888, `-cmoe --moe-cache-mib 11500/10500`, **upstream engine ≥ b11541 only**) |
 | `vram_records.json` | Measured VRAM footprints per model+engine+ctx (auto-written after each model load; feeds the guard AND Library fit dots). Git-ignored, machine-local |
 | `scripts/_research_moe/RESEARCH.md` | MoE campaign fact base: sources, benchmarks (server_96k.jsonl etc), VRAM-edge law, measured negatives |
 | `configs/inference.env` | Server parameters |
@@ -49,7 +49,7 @@ Measured negatives (do not retry blindly):
 - **ub > 512 at the edge**: ub1024 on qw ncmoe20 → 10.9 t/s (spill). DS-guide's `-b/-ub 4096` advice targets huge-CPU-weight rigs, inverts at our VRAM edge.
 - **threads 6**: 25.2/40.1 vs 29.0/47.2 at t5 — the 6th thread starves the GPU driver. Keep `-t 5 -tb 6`.
 - **Blade-edge configs are real but not preset material**: qw ncmoe20 (33 t/s, 150 MB free) and gm ncmoe4 (54 t/s, 160 MB free) run faster until any dwm/browser spike pushes them into WDDM spill — on a desktop system they flake (rep runs dropped to 26/44 t/s).
-- **Upstream llama.cpp b10712 loses to beellama on both MoE** (qw 26.8 vs 29.5; gm 42.7 vs 47.5) — beellama v0.4.5 is THE MoE engine here.
+- **Upstream llama.cpp b10712 loses to beellama on both MoE** (qw 26.8 vs 29.5; gm 42.7 vs 47.5) — beellama v0.4.5 is THE MoE engine for the no-cache path. (2026-10-10 update: upstream b11541 + `--moe-cache-mib` now WINS decode by +38%/+52% — see the expert-cache section below; beellama keeps the prefill crown.)
 - **ik_llama 15dddc6 also loses on both MoE** (qw 26.5; gm 24.0-27.1; pp 130-160 t/s vs beellama's 420-1530) and uses MORE VRAM at the same ncmoe. Its fused-MoE/`-t 1` tuning targets big-EPYC+300GB-RAM rigs: `-t 1` on our 6-core dropped tg to 12.1 t/s. `--no-fmoe` crashed the server on qw. Keep ik_llama for its DENSE Qwen3.8 IQ4_KT/KS niche (trellis quants) — not for MoE.
 
 Engine note (CORRECTED 2026-09-10 — the earlier claim here was WRONG): `--n-cpu-moe N` moves the **first N layers'** experts to CPU in **both** beellama and upstream. Verified in source, not just help text: `llm_ffn_block_regex()` builds `blk\.%d` for `i = 0..N-1` (`beellama.cpp/common/common.h:1242`, applied at `common/arg.cpp:3046`), and upstream b10894's own help reads "keep the Mixture of Experts (MoE) weights of the first N layers in the CPU". There is NO opposite counting direction — the same N transfers between these two engines.
@@ -123,16 +123,64 @@ best rows).
   feature requests (#30205/#30163) and future work (#29949 GPU-resident LRU,
   #29963 pipeline parallelism).
 
-**Consequences for EngineBay:**
-- Test on the **upstream engine** (Check Updates → b11541 or newer). beellama does
-  NOT have the cache yet (last push 2026-10-07, pre-merge) — until it rebases,
-  upstream becomes the MoE engine if the gain reproduces.
-- Our 16 GB plan per model: raise `--n-cpu-moe` to (nearly) all layers and give the
-  freed VRAM to the cache — qw: `ncmoe 40` + `--moe-cache-mib ~9000`; gm: `ncmoe 30`
-  + `--moe-cache-mib ~9500` — keep ~900 MB headroom (our VRAM-edge law still
-  applies: the cache is a VRAM consumer). Baselines to beat: qw 29.6 t/s, gm 47.5.
-- The asset naming is unchanged (`llama-b11541-bin-win-cuda-13.4-x64.zip` +
-  `cudart-…`); the launcher classifier parses it — no code change needed to fetch.
+**Measured on THIS box (2026-10-10, b11541, 96K, q4_0 KV, port-8099 protocol;**
+`scripts/_research_moe/bench_moe_cache*.py`, logs `moe_cache_b11541.jsonl`,
+`moe_cache_steady.jsonl`, `moe_cache_hybrid.jsonl`). Warm-cache steady state
+(warmup gen + 2 measured), all experts in RAM (`-cmoe`) + cache:
+
+| Model | config | cold 220-tok | **steady tg** | pp | free |
+|---|---|---:|---:|---:|---:|
+| Qwen3.6-35B-A3B Q6_K | `-cmoe --moe-cache-mib 9000` | 25.7 | — | 216 | 3481 |
+| Qwen3.6-35B-A3B Q6_K | `-cmoe --moe-cache-mib 10500` | 28.8 | 36.0 | 228 | 1988 |
+| Qwen3.6-35B-A3B Q6_K | `-cmoe --moe-cache-mib 11500` | 27.8 | **40.8** | 251 | 1043 |
+| Gemma-4-26B-A4B Q4_K_M | `-cmoe --moe-cache-mib 8500` | 44.4 | — | 707 | 2973 |
+| Gemma-4-26B-A4B Q4_K_M | `-cmoe --moe-cache-mib 9500` | 46.9 | 65.8 | 836 | 1979 |
+| Gemma-4-26B-A4B Q4_K_M | `-cmoe --moe-cache-mib 10500` | 46.0 | **72.2** | 1101 | 1006 |
+
+vs the standing beellama records (qw 29.6 tg / 420 pp; gm 47.5 tg / 1530 pp):
+**+38% / +52% decode**, at the cost of **−40% / −28% prefill** (large batches
+keep the regular CPU path — only decode batches ≤32 tokens use the cache).
+Cache scales with size until the VRAM edge (qw 11500 → free 1043 MB is the
+sweet spot; do NOT go further). **Cold-start is real**: the LRU is empty after
+load — the first ~200 tokens run at 25–47 t/s; steady state needs a warm cache.
+
+**Measured negative — `--fit` + `--moe-cache-mib` on 16 GB (do not retry):** fit
+under-reserves for the cache (free ended ~200 MB on both models) → WDDM spill →
+qw **3.65 t/s**, gm 13.5 t/s (vs 40.8/72.2 for the explicit `-cmoe` recipe).
+This is the VRAM-edge law hitting the auto-planner: with the cache as a VRAM
+consumer, place experts EXPLICITLY (`-cmoe`) and size the cache by hand.
+
+**New presets (ADD-only, the 12 old ones untouched):**
+`Qwen3.6-35B-A3B (MoE cache)` = base params + `-cmoe --moe-cache-mib 11500`,
+`Gemma-4-26B-A4B (MoE cache)` = base + `-cmoe --moe-cache-mib 10500`, both port
+8888. **They require the upstream engine ≥ b11541** (beellama rejects the flag
+and dies at startup); installed at `llama.cpp/versions/b11541-cuda-13.4/`.
+Use them for chat/agentic (long generations); keep the (Bee MoE) presets for
+prompt-heavy work (2× better prefill).
+
+**Dense Qwen3.8-27B — checked, nothing new (2026-10-10):**
+- The new GDN CUDA kernel (#30087, "four GDN state columns per warp", merged
+  2026-10-08, in b11541) did NOT move the needle here: IQ4_XS-pure with the
+  "Qwen3.8-27B (llama.cpp upstream)" preset params measured **12.08 t/s on
+  b11541 vs 12.29 t/s on beellama v0.4.7** (same model, same params). That
+  preset is CPU-FFN-limited (`--override-tensor ...ffn_.*=CPU`, 8 layers →
+  ~1.1 GB of FFN computed per token on the i7-5820K) — the engine doesn't
+  matter. ik_llama + IQ4_KT (whole model in VRAM, 35.9 t/s) stays the dense
+  champion; `dense_b11541.jsonl` has the A/B.
+- `--cpu-mtp` (CPU-offloaded MTP drafter) was **NOT merged** — three attempts
+  (#29618/#29619/#29620) all closed unmerged. The 48K MTP limit stands.
+- `--cache-ram` (default 8192 MiB) is the **RAM prompt-state cache** for idle
+  slots (PR #16391) — a capacity/UX feature (conversation switching), not a
+  decode-speed feature. Noted, not tuned.
+
+**Consequences for EngineBay (updated after measurement):**
+- The gain DID reproduce — warm-cache steady decode beats our beellama records by
+  +38% (qw) / +52% (gm). The (MoE cache) presets above ship it; b11541 is already
+  installed at `llama.cpp/versions/b11541-cuda-13.4/` and the asset naming is
+  unchanged, so Check Updates fetches newer builds with no code change.
+- beellama remains the engine for the no-cache path (its `(Bee MoE)` presets keep
+  the prefill crown: 420/1530 t/s pp vs the cache configs' ~250/1101). Watch for a
+  beellama rebase onto ≥ b11541 — then it inherits the cache too.
 
 **The three third-party forks, for reference (all pre-date/pre-empt the upstream
 port; the core idea won and is upstream now):**

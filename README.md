@@ -16,6 +16,16 @@ Gemma-4-26B-A4B (23.5 GB) run on the same 16 GB card via expert offload
 "(Bee MoE)" ship in `launcher_presets.json`. Full research:
 [scripts/_research_moe/RESEARCH.md](scripts/_research_moe/RESEARCH.md).
 
+**MoE expert cache (2026-10, upstream llama.cpp ≥ b11541, measured here):** the
+new `--moe-cache-mib` (PR #29887, a port of the qvac-fabric cache) keeps the
+hottest experts resident in VRAM with LRU eviction and runs decode MUL_MAT_ID on
+the GPU — only misses upload over PCIe. With all experts in RAM (`-cmoe`) plus a
+~10.5–11.5 GB cache, **warm-cache steady decode hits 40.8 t/s (Qwen3.6-35B-A3B,
++38%) and 72.2 t/s (Gemma-4-26B-A4B, +52%)** on this 16 GB card — at the cost of
+~40% slower prefill (large batches keep the regular CPU path). Presets
+"(MoE cache)" ship for chat/agentic workloads; the "(Bee MoE)" presets remain
+prefill champions. Requires the upstream engine (beellama has no cache yet).
+
 ## Features
 
 - **PyQt6 GUI launcher** — model selection, presets, llama.cpp version management
@@ -23,7 +33,7 @@ Gemma-4-26B-A4B (23.5 GB) run on the same 16 GB card via expert offload
 - **Version manager** — download, install, and switch between llama.cpp releases from GitHub (streamed download with live MB progress, stall-timeout, retries, and an optional configurable proxy via `launcher_config.json` `"proxy"` key)
 - **Multi-engine support** — select between upstream llama.cpp, BeeLlama.cpp (fork), and ik_llama.cpp (fork, source-built) with per-engine version management, download, and activation
 - **Model Library** — recursive GGUF discovery under a user-chosen root with a persistent header cache: search, per-row fit dots (🟢🟡🔴 against measured VRAM records / calibrated estimates), `[MoE offload]` ⚫ markers for MoE files (they run with expert offload — a red dot would be a lie), `[projector]`/`[draft]` tags
-- **MoE expert offload presets** — measured `--n-cpu-moe` configs for Qwen3.6-35B-A3B and Gemma-4-26B-A4B (see the VRAM-edge law below)
+- **MoE expert offload + expert cache presets** — measured `--n-cpu-moe` configs for Qwen3.6-35B-A3B and Gemma-4-26B-A4B (see the VRAM-edge law below), plus upstream `--moe-cache-mib` variants (+38%/+52% warm decode, see the cache table)
 - **Engine-safe presets** — presets carry params/host/port only (never model paths); incompatible flags are auto-detected when switching engines or loading presets, with a warning dialog instead of a crash
 - **Health monitor** — real-time server status in the GUI
 - **Hermes + DeepSeek Harness sync** — auto-registers the running server as a local provider in both `~/.hermes/config.yaml` and `~/.dsh/settings.yaml`, keeping the port in sync when you change it in the GUI
@@ -40,6 +50,18 @@ v0.4.5, 96K ctx, q4_0 KV):
 |---|---|---|---|---|---|
 | Qwen3.6-35B-A3B Q6_K | 26.6 GB | `--n-cpu-moe 21` (of 40) | **29.6 t/s** | 420 t/s | 650 MB |
 | Gemma-4-26B-A4B Q4_K_M | 23.5 GB | `--n-cpu-moe 6` (of 30) | **47.5 t/s** | 1530 t/s | 660 MB |
+
+The expert cache changes the trade-off (upstream ≥ b11541, all experts in RAM +
+`--moe-cache-mib`; warm-cache steady state, same box and protocol):
+
+| Model | Preset | Decode (steady) | Prefill | VRAM free |
+|---|---|---|---|---|
+| Qwen3.6-35B-A3B Q6_K | `-cmoe --moe-cache-mib 11500` | **40.8 t/s** (+38%) | ~250 t/s (−40%) | 1043 MB |
+| Gemma-4-26B-A4B Q4_K_M | `-cmoe --moe-cache-mib 10500` | **72.2 t/s** (+52%) | ~1101 t/s (−28%) | 1006 MB |
+
+Cold-start note: the LRU is cold after load — the first ~200 tokens run ~25–47 t/s
+below steady state. Do **not** combine the cache with `--fit`: fit under-reserves
+VRAM for the cache on a 16 GB card (measured: free ~200 MB → WDDM spill → 3.6 t/s).
 
 Measured negatives (do not retry blindly): MTP draft on A3B, KVarN on MoE archs,
 `-ub > 512` at the edge, `-t 6`, blade-edge configs (no headroom — a dwm/browser
@@ -164,8 +186,8 @@ reads the IQ4_KT/KS trellis quants used in the MTP variant:
 | [jpetrina/Qwen3.8-27B-IQ4_XS-pure-GGUF](https://huggingface.co/jpetrina/Qwen3.8-27B-IQ4_XS-pure-GGUF) | IQ4_XS (pure, ~13.5 GB) | All engines | Best choice for upstream llama.cpp / BeeLlama |
 | [jpetrina/Qwen3.8-27B-MTP-IQ4_XS-pure-GGUF](https://huggingface.co/jpetrina/Qwen3.8-27B-MTP-IQ4_XS-pure-GGUF) | IQ4_XS (MTP) | All engines (MTP-capable) | MTP spec decoding variant — fits ≤48K on 16 GB |
 | [jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller](https://huggingface.co/jrell/Qwen3.8-27B-i1-IQ4_XS-GGUF-Smaller) | IQ4_XS (Smaller, 12.6 GB) | All engines | Slimmest option — more KV headroom |
-| Qwen3.6-35B-A3B (Q6_K, 26.6 GB) | MoE 35B-A3B | beellama.cpp | Expert offload `--n-cpu-moe 21` → 29.6 t/s @ 96K on 16 GB (preset "Qwen3.6-35B-A3B (Bee MoE)") |
-| Gemma-4-26B-A4B (Q4_K_M/Q6_K_L) | MoE 26B-A4B | beellama.cpp | Expert offload `--n-cpu-moe 6` → 47.5 t/s @ 96K on 16 GB (preset "Gemma-4-26B-A4B (Bee MoE)") — fastest model in the fleet |
+| Qwen3.6-35B-A3B (Q6_K, 26.6 GB) | MoE 35B-A3B | beellama.cpp | Expert offload `--n-cpu-moe 21` → 29.6 t/s @ 96K on 16 GB (preset "Qwen3.6-35B-A3B (Bee MoE)"); with the upstream expert cache `--moe-cache-mib 11500` → 40.8 t/s warm (preset "Qwen3.6-35B-A3B (MoE cache)", upstream ≥ b11541) |
+| Gemma-4-26B-A4B (Q4_K_M/Q6_K_L) | MoE 26B-A4B | beellama.cpp | Expert offload `--n-cpu-moe 6` → 47.5 t/s @ 96K on 16 GB (preset "Gemma-4-26B-A4B (Bee MoE)"); with the upstream expert cache `--moe-cache-mib 10500` → 72.2 t/s warm (preset "Gemma-4-26B-A4B (MoE cache)") — fastest decode in the fleet |
 
 The sharp chat template (used by the MTP preset via
 `--chat-template-file configs/qwen3.8_sharp_chat_template.jinja`) comes from
@@ -204,7 +226,7 @@ The sharp chat template (used by the MTP preset via
 3. **Launch the GUI:** double-click `Launcher.vbs` (no terminal window) or run `python launcher.py`.
 4. **Select your model:** pick the GGUF in the *Model* field (e.g. from the HF links above), or open **Library** and pick from your collection (first open asks for your models root; fit dots show what fits in VRAM, ⚫ marks MoE models runnable via expert offload).
 5. **Pick the engine:** set the *Engine* dropdown to `ik_llama.cpp` (for IQ4_KT/KS) or `llama.cpp` / `BeeLlama.cpp` — use **Check Updates → Use** to activate a binary.
-6. **Load a preset:** choose `Qwen3.8-27B (ik_llama pure)` from the presets list (96K, q4_0 KV, `--reasoning auto`), or a `(Bee MoE)` preset for Qwen3.6-35B-A3B / Gemma-4-26B-A4B (expert offload, see the VRAM-edge law above).
+6. **Load a preset:** choose `Qwen3.8-27B (ik_llama pure)` from the presets list (96K, q4_0 KV, `--reasoning auto`), or a `(Bee MoE)` preset for Qwen3.6-35B-A3B / Gemma-4-26B-A4B (expert offload, see the VRAM-edge law above). For maximum decode speed on chat/agentic workloads use the `(MoE cache)` presets instead — they need the **llama.cpp (upstream)** engine ≥ b11541 (Check Updates → download b11541 or newer → Use).
 7. **Start:** click **Start Server** and wait for the model to load into VRAM.
 
 From the console instead: `set MODEL_GGUF=<path>` then `start-llama.bat`

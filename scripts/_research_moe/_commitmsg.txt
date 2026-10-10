@@ -1,0 +1,32 @@
+MoE expert cache measured live: +38%/+52% decode -> 2 new presets
+
+Downloaded upstream b11541 (first nightly with --moe-cache-mib, PR #29887)
+into llama.cpp/versions/b11541-cuda-13.4/ and benchmarked the cache ladder
+on both MoE models (96K, q4_0 KV, port-8099 protocol):
+
+- Qwen3.6-35B-A3B Q6_K, -cmoe --moe-cache-mib 11500: 40.8 t/s steady
+  warm-cache decode (42.1/39.5) vs 29.6 beellama record = +38%; pp 422->251.
+- Gemma-4-26B-A4B Q4_K_M, -cmoe --moe-cache-mib 10500: 72.2 t/s steady
+  (74.7/69.7) vs 47.5 = +52%; pp 1428->1101.
+- Cache scales with size to the VRAM edge; LRU cold-start is real (first
+  ~200 tokens 25-47 t/s below steady; warm up before measuring).
+- Measured negative: --fit + --moe-cache-mib oversubscribes 16 GB (free
+  ~200 MB -> WDDM spill -> 3.65 t/s). Do not combine; place experts
+  explicitly and size the cache by hand.
+
+New presets (ADD-only, old 12 untouched): "Qwen3.6-35B-A3B (MoE cache)"
+and "Gemma-4-26B-A4B (MoE cache)", port 8888, upstream engine >= b11541
+required (beellama rejects the flag). Smoke-verified via the exact GUI
+command path (healthy start + coherent generation on both).
+
+Dense Qwen3.8-27B check: new GDN warp kernel (#30087) changed nothing here
+(IQ4_XS-pure: 12.08 t/s on b11541 vs 12.29 on beellama v0.4.7 - that
+preset is CPU-FFN-bound); --cpu-mtp NOT merged (#29618/19/20 closed);
+ik_llama IQ4_KT 35.9 t/s keeps the dense crown.
+
+Docs: AGENTS.md (measured tables + negatives + dense check), README.md
+(cache intro + trade-off table + preset rows + first-launch note),
+RESEARCH.md (cache campaign section with all data), REVIEW.md (P0 done).
+
+Tests: full suite green (config persistence, smoke 29 rows/0 red,
+fit-dots, e2e, gguf meta/moe).
