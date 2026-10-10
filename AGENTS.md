@@ -14,7 +14,7 @@ Windows-only llama.cpp inference server (EngineBay). Runs Qwen3.8-27B (IQ4_KT/KS
 | `Launcher.bat` | Open PyQt6 GUI (`launcher.py`) |
 | `launch-hermes-llama.bat` | Start server + Hermes with local provider |
 | `launcher.py` | GUI: model selection, presets, llama.cpp version management, **engine selection**, **VRAM guard + DLL diagnostics**, **Model Library** |
-| `launcher_presets.json` | Saved configs: 10 dense (Qwen3.8-27B/Agentic/Gemma4/KVarN/MTP) + "Qwen3.6-35B-A3B (Bee MoE)" + "Gemma-4-26B-A4B (Bee MoE)" (port 8888, `--n-cpu-moe 21/6`) + "Qwen3.6-35B-A3B (MoE cache)" + "Gemma-4-26B-A4B (MoE cache)" (port 8888, `-cmoe --moe-cache-mib 11500/10500`, **upstream engine ≥ b11541 only**) |
+| `launcher_presets.json` | Saved configs: 10 dense (Qwen3.8-27B/Agentic/Gemma4/KVarN/MTP) + "Qwen3.6-35B-A3B (Bee MoE)" + "Gemma-4-26B-A4B (Bee MoE)" (port 8888, `--n-cpu-moe 21/6`) + "Qwen3.6-35B-A3B (MoE cache)" + "Gemma-4-26B-A4B (MoE cache)" (port 8888, `-cmoe --moe-cache-mib 11500/10500`, **upstream engine ≥ b11541 only**). Every preset carries a `desc` usage note (which model to pair, required engine, when to use) shown as a combo-box tooltip; `_save_preset` preserves/edits `desc` on overwrite — never write a bare `{params, host, port}` dict over a preset. Enforced by `scripts/test_preset_desc.py` |
 | `vram_records.json` | Measured VRAM footprints per model+engine+ctx (auto-written after each model load; feeds the guard AND Library fit dots). Git-ignored, machine-local |
 | `scripts/_research_moe/RESEARCH.md` | MoE campaign fact base: sources, benchmarks (server_96k.jsonl etc), VRAM-edge law, measured negatives |
 | `configs/inference.env` | Server parameters |

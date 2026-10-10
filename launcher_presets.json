@@ -2,71 +2,85 @@
   "Qwen3.6-27B": {
     "params": "-c 98304 -ngl 99 -b 2048 -ub 512 --kv-unified --cache-type-k q4_0 --cache-type-v q4_0 -t 5 --flash-attn on --reasoning off --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "Dense Qwen3.6-27B (hybrid DeltaNet + GQA) on the UPSTREAM llama.cpp engine. Pair with a Qwen3.6-27B GGUF (IQ4_XS fits 16 GB). General chat baseline; --reasoning off is required on this arch. 96K, q4_0 KV."
   },
   "Agentic AI": {
     "params": "-c 98304 -np 1 -fa on -t 5 -ctk q4_0 -ctv q4_0 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "LEGACY MoE expert-offload experiment (n-cpu-moe 20, small 512 batches, port 8888). Superseded by the tuned (Bee MoE) presets — kept for reference. Prefer 'Qwen3.6-35B-A3B (Bee MoE)' or the (MoE cache) pair."
   },
   "Gemma4 no-mmap": {
     "params": "-c 98304 -np 1 -fa on -t 5 -ctk q4_0 -ctv q4_0 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --no-mmap --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "LEGACY Gemma-4 MoE config with --no-mmap (a BEE LLAMA-only flag; upstream uses --load-mode). Superseded by the tuned (Bee MoE) / (MoE cache) presets — kept for reference."
   },
   "Qwen3.6-27B (Bee KVarN)": {
     "params": "-c 98304 -ngl 99 -b 2048 -ub 512 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 --flash-attn on --reasoning off --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "Dense Qwen3.6-27B on the BEE LLAMA engine with KVarN KV compression (kvarn5/kvarn4 + 1024-token F16 tail) — frees VRAM vs q4_0. Pair with a Qwen3.6-27B GGUF readable by beellama (IQ4_XS; not the ik-quants)."
   },
   "Qwen3.8-27B (Bee KVarN MTP)": {
     "params": "-c 100000 -np 1 -ngl 99 -b 1024 -ub 256 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 -tb 6 --flash-attn on --spec-type draft-mtp --spec-draft-n-max 2 --reasoning auto --jinja --chat-template-file configs/qwen3.8_sharp_chat_template.jinja --chat-template-kwargs \"{\\\"preserve_thinking\\\": true, \\\"reasoning_effort\\\":\\\"medium\\\"}\" --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "Dense Qwen3.8-27B (qwen35) on BEE LLAMA: KVarN KV + MTP speculative draft (n_max 2) + sharp chat template with medium reasoning effort. Fastest Bee dense variant; needs an IQ4_XS-class file that fits ALONGSIDE the draft. --reasoning auto is required (tools break with off)."
   },
   "Qwen3.8-27B (Bee KVarN pure)": {
     "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --kv-unified --cache-type-k kvarn5 --cache-type-v kvarn4 --kv-tail-tokens 1024 -t 5 -tb 6 --flash-attn on --jinja --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "Dense Qwen3.8-27B (qwen35) on BEE LLAMA, no speculation: KVarN KV, 96K, --reasoning auto + --jinja required. The beellama flagship for daily chat on IQ4_XS-class files (the IQ4_KT trellis quant needs ik_llama)."
   },
   "Qwen3.8-27B (llama.cpp upstream)": {
     "params": "-c 98304 -np 1 -ngl 99 -b 2048 -ub 512 --kv-unified --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --jinja --reasoning auto --load-mode none --override-tensor \"blk\\\\.(6|14|22|30|38|46|54|62)\\\\.ffn_.*=CPU\" --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "Dense Qwen3.8-27B on the UPSTREAM engine: 8 FFN layers offloaded to CPU (--override-tensor) to fit 96K. Measured ~12 t/s — CPU-FFN-bound on this machine; use only when the upstream engine is required, 'ik_llama pure' is ~3x faster."
   },
   "Qwen3.8-27B (ik_llama MTP)": {
     "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --spec-type mtp:n_max=2 --jinja --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "Dense Qwen3.8-27B on IK_LLAMA with MTP speculative decoding (mtp:n_max=2). Faster than pure when it fits: pair with an IQ4_XS-class file — the 14 GB IQ4_KT + draft measured only up to 48K context; fall back to 'ik_llama pure' at 96K."
   },
   "Qwen3.8-27B (ik_llama pure)": {
     "params": "-c 98304 -np 1 -ngl 99 -b 1024 -ub 256 --cache-type-k q4_0 --cache-type-v q4_0 -t 5 -tb 6 --flash-attn on --jinja --reasoning auto --temp 1.0 --min-p 0.0 --top-p 0.95 --top-k 20 --presence-penalty 0.0 --repeat-penalty 1.0 --no-mmproj-offload",
     "host": "127.0.0.1",
-    "port": "8080"
+    "port": "8080",
+    "desc": "THE flagship: dense Qwen3.8-27B on IK_LLAMA, measured 35.9 t/s @ 96K. Pair with the IQ4_KT/KS trellis quant (only ik_llama reads ggml type 144). --reasoning auto + --jinja required. Daily driver."
   },
   "Gemma4 (Bee q5_0 tail)": {
     "params": "-c 98304 -np 1 -fa on -t 5 -ctk q5_0 -ctv q5_0 --kv-tail-tokens 1024 -b 512 -ub 512 --kv-unified --n-cpu-moe 20 -ngl 99 --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "LEGACY Gemma-4 MoE quality variant: q5_0 KV with a 1024-token F16 precision tail (higher KV fidelity than q4_0) on BEE LLAMA. Slower than the tuned (Bee MoE) preset — kept for quality comparisons."
   },
   "Qwen3.6-35B-A3B (Bee MoE)": {
     "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified --n-cpu-moe 21 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "MoE Qwen3.6-35B-A3B Q6_K (26.6 GB file, port 8888): experts of 21/40 layers on CPU. Measured 29.6 t/s tg / 420 t/s pp, 650 MB free. The PREFILL champion for prompt-heavy / long-context work; use the (MoE cache) variant for long chat generations."
   },
   "Gemma-4-26B-A4B (Bee MoE)": {
     "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified --n-cpu-moe 6 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "MoE Gemma-4-26B-A4B heretic Q4_K_M (port 8888): experts of 6/30 layers on CPU. Measured 47.5 t/s tg / 1530 t/s pp — the PREFILL champion (fastest pp in the fleet). Use the (MoE cache) variant for long chat generations."
   },
   "Qwen3.6-35B-A3B (MoE cache)": {
     "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified -cmoe --moe-cache-mib 11500 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "MoE Qwen3.6-35B-A3B Q6_K with the upstream expert cache: ALL experts in RAM (-cmoe) + 11.5 GB hot-expert VRAM cache. Measured 40.8 t/s steady decode (+38% vs Bee MoE) — best for CHAT/AGENTIC (long generations). Prefill drops to ~250 t/s: use (Bee MoE) for prompt-heavy work. First ~200 tokens run cold (~28 t/s). REQUIRES the UPSTREAM engine >= b11541 — beellama rejects --moe-cache-mib and dies."
   },
   "Gemma-4-26B-A4B (MoE cache)": {
     "params": "-c 98304 -np 1 -ngl 99 -fa on -t 5 -tb 6 -ctk q4_0 -ctv q4_0 -b 2048 -ub 512 --kv-unified -cmoe --moe-cache-mib 10500 --load-mode none --jinja --warmup --temp 1.0 --min-p 0.05 --top-p 0.95 --top-k 64 --reasoning off",
     "host": "127.0.0.1",
-    "port": "8888"
+    "port": "8888",
+    "desc": "MoE Gemma-4-26B-A4B heretic Q4_K_M with the upstream expert cache: ALL experts in RAM + 10.5 GB cache. Measured 72.2 t/s steady decode (+52% vs Bee MoE, peak 74.7) — the DECODE champion; best for chat/agentic. Prefill ~1101 t/s. First ~200 tokens run cold (~46 t/s). REQUIRES the UPSTREAM engine >= b11541 — beellama rejects --moe-cache-mib and dies."
   }
 }

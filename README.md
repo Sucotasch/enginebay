@@ -34,6 +34,7 @@ prefill champions. Requires the upstream engine (beellama has no cache yet).
 - **Multi-engine support** — select between upstream llama.cpp, BeeLlama.cpp (fork), and ik_llama.cpp (fork, source-built) with per-engine version management, download, and activation
 - **Model Library** — recursive GGUF discovery under a user-chosen root with a persistent header cache: search, per-row fit dots (🟢🟡🔴 against measured VRAM records / calibrated estimates), `[MoE offload]` ⚫ markers for MoE files (they run with expert offload — a red dot would be a lie), `[projector]`/`[draft]` tags
 - **MoE expert offload + expert cache presets** — measured `--n-cpu-moe` configs for Qwen3.6-35B-A3B and Gemma-4-26B-A4B (see the VRAM-edge law below), plus upstream `--moe-cache-mib` variants (+38%/+52% warm decode, see the cache table)
+- **Preset usage tooltips** — every preset carries a `desc` note (which model to pair, required engine, when to use it) shown as a tooltip when hovering the preset list and the selected preset; preserved and editable when re-saving a preset
 - **Engine-safe presets** — presets carry params/host/port only (never model paths); incompatible flags are auto-detected when switching engines or loading presets, with a warning dialog instead of a crash
 - **Health monitor** — real-time server status in the GUI
 - **Hermes + DeepSeek Harness sync** — auto-registers the running server as a local provider in both `~/.hermes/config.yaml` and `~/.dsh/settings.yaml`, keeping the port in sync when you change it in the GUI

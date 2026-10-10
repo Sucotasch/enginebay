@@ -1174,10 +1174,8 @@ class LLMLauncher(QMainWindow):
         preset_layout.addWidget(preset_lbl)
 
         self.preset_combo = QComboBox()
-        self.preset_combo.addItem("(none)")
-        for name in self.presets:
-            self.preset_combo.addItem(name)
         self.preset_combo.currentTextChanged.connect(self._on_preset_selected)
+        self._refresh_preset_menu()  # populates items WITH per-preset tooltips
         preset_layout.addWidget(self.preset_combo, 1)
 
         save_preset_btn = QPushButton("\U0001f4be")
@@ -1363,7 +1361,10 @@ class LLMLauncher(QMainWindow):
 
     def _on_preset_selected(self, name: str):
         if name == "(none)" or name not in self.presets:
+            self.preset_combo.setToolTip("")
             return
+        # Keep the closed-combo tooltip in sync with the selected preset
+        self.preset_combo.setToolTip(self._preset_tooltip(name))
         p = self.presets[name]
         # Presets are model-agnostic (params only), but params are engine-specific:
         # warn if the selected preset carries flags the current engine cannot parse,
@@ -1420,11 +1421,24 @@ class LLMLauncher(QMainWindow):
         if not ok or not name.strip() or name.strip() == "(none)":
             return
         name = name.strip()
-        self.presets[name] = {
+        # The usage note (desc) is user-authored data: prefill it on overwrite
+        # so re-saving a preset never silently drops it.
+        existing = self.presets.get(name) or {}
+        desc, ok = QInputDialog.getMultiLineText(
+            self, "Preset description",
+            "Usage note (shows as a tooltip): which model to pair, "
+            "required engine, and when to use it.",
+            (existing.get("desc") or "").strip())
+        if not ok:
+            return  # cancelled — do not write a half-updated preset
+        entry = {
             "params": self.params_text.toPlainText().strip(),
             "host": self.host_entry.text().strip(),
             "port": self.port_entry.text().strip(),
         }
+        if desc.strip():
+            entry["desc"] = desc.strip()
+        self.presets[name] = entry
         save_presets(self.presets)
         self._refresh_preset_menu()
         self._log(f'Preset "{name}" saved')
@@ -1440,13 +1454,32 @@ class LLMLauncher(QMainWindow):
             self._refresh_preset_menu()
             self._log(f'Preset "{name}" deleted')
 
+    def _preset_tooltip(self, name: str) -> str:
+        """Tooltip for a preset row: name + its usage note (desc) + port."""
+        p = self.presets.get(name) or {}
+        lines = [name]
+        desc = (p.get("desc") or "").strip()
+        if desc:
+            lines += ["", desc]
+        if p.get("port"):
+            lines.append(f"Port: {p['port']}")
+        return "\n".join(lines)
+
     def _refresh_preset_menu(self):
         self.preset_combo.blockSignals(True)
         self.preset_combo.clear()
         self.preset_combo.addItem("(none)")
+        self.preset_combo.setItemData(
+            0, "Pick a preset to load its params, host and port. "
+               "Hover an item for its usage note.",
+            Qt.ItemDataRole.ToolTipRole)
         for name in self.presets:
+            row = self.preset_combo.count()
             self.preset_combo.addItem(name)
+            self.preset_combo.setItemData(row, self._preset_tooltip(name),
+                                           Qt.ItemDataRole.ToolTipRole)
         self.preset_combo.setCurrentIndex(0)
+        self.preset_combo.setToolTip("")
         self.preset_combo.blockSignals(False)
 
     def _paste_params(self):
